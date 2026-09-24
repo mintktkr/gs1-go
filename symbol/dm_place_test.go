@@ -2,6 +2,7 @@ package symbol
 
 import (
 	"fmt"
+	"math/rand"
 	"strconv"
 	"strings"
 	"testing"
@@ -129,28 +130,85 @@ func TestDMPlaceFinderLiterals(t *testing.T) {
 }
 
 // TestDMPlaceCoverage checks that the placement fills every module of the
-// mapping matrix exactly once, and that it consumes exactly the codewords it
-// was given.
+// mapping matrix, and that it consumes exactly the codewords it was given.
+// With an all-ones codeword stream every codeword bit is dark, so a module the
+// walk never reaches stays light; together with the write budget — 8 modules
+// per codeword, plus the four fixed modules of a trailing group — filling the
+// whole matrix leaves no room for a module written twice.
 func TestDMPlaceCoverage(t *testing.T) {
 	for i, s := range dmSizes {
 		t.Run(sizeName(s), func(t *testing.T) {
-			cw := testCW(s.DataCW + s.ECCCW)
-			m := dmMappingOf(cw, s)
+			cw := make([]byte, s.DataCW+s.ECCCW)
+			for j := range cw {
+				cw[j] = 0xFF
+			}
+			m := newDMMapping(newMatrix(s.Rows, s.Cols), s)
+			m.fill(cw)
 			if m.used != len(cw) {
 				t.Errorf("vers %d: consumed %d codewords, want %d", i+1, m.used, len(cw))
 			}
 			rows, cols := s.mappingSize()
-			if m.writes != rows*cols {
-				t.Errorf("vers %d: %d module writes for %d modules", i+1, m.writes, rows*cols)
+			if n := 8 * len(cw); n != rows*cols && n+4 != rows*cols {
+				t.Errorf("vers %d: %d codewords hold %d module writes, matrix has %d modules",
+					i+1, len(cw), n, rows*cols)
 			}
+			// A matrix that is not a whole number of codewords ends with the
+			// four fixed modules, two of which are light; skip them, as they
+			// carry no codeword bit.
+			fixed := 8*len(cw) != rows*cols
 			for r := 0; r < rows; r++ {
 				for c := 0; c < cols; c++ {
-					if !m.placed(r, c) {
+					if fixed && r >= rows-2 && c >= cols-2 {
+						continue
+					}
+					got := m.out.Dark(r+2*(r/s.RegionRows)+1, c+2*(c/s.RegionCols)+1)
+					if !got {
 						t.Fatalf("vers %d: mapping module (%d,%d) was never placed", i+1, r, c)
 					}
 				}
 			}
 		})
+	}
+}
+
+// TestDMPlaceLayout checks that the cached layout of every size, applied to a
+// codeword stream, reproduces the direct placement module for module. The
+// all-ones stream repeats the coverage argument of TestDMPlaceCoverage for the
+// layout: a data module without a layout entry stays light, and the write
+// budget leaves no room for a module carrying two entries.
+func TestDMPlaceLayout(t *testing.T) {
+	for _, s := range dmSizes {
+		t.Run(sizeName(s), func(t *testing.T) {
+			tab := buildDMLayout(s)
+			n := s.DataCW + s.ECCCW
+			ones := make([]byte, n)
+			for i := range ones {
+				ones[i] = 0xFF
+			}
+			rng := rand.New(rand.NewSource(int64(s.Rows)))
+			rngCW := make([]byte, n)
+			for i := range rngCW {
+				rngCW[i] = byte(rng.Intn(256))
+			}
+			for i, cw := range [][]byte{testCW(n), ones, make([]byte, n), rngCW} {
+				compareMatrix(t, sizeName(s)+" stream "+strconv.Itoa(i), dmPlaceLayout(tab, cw, s), dmPlace(cw, s))
+			}
+		})
+	}
+}
+
+// compareMatrix fails the test at the first module where got and want differ.
+func compareMatrix(t *testing.T, name string, got, want *Matrix) {
+	t.Helper()
+	if got.Rows != want.Rows || got.Cols != want.Cols {
+		t.Fatalf("%s: got %dx%d, want %dx%d", name, got.Rows, got.Cols, want.Rows, want.Cols)
+	}
+	for r := 0; r < want.Rows; r++ {
+		for c := 0; c < want.Cols; c++ {
+			if got.Dark(r, c) != want.Dark(r, c) {
+				t.Fatalf("%s: module (%d,%d) = %v, want %v", name, r, c, got.Dark(r, c), want.Dark(r, c))
+			}
+		}
 	}
 }
 

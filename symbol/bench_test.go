@@ -108,3 +108,33 @@ func BenchmarkPalettedPNGSmall(b *testing.B) {
 		}
 	}
 }
+
+// benchEncoder benchmarks repeated encoding with one warmed Encoder, the case
+// its cached module layouts exist for.
+func benchEncoder(b *testing.B, in string) {
+	var e Encoder
+	if _, err := e.GS1DataMatrix(in, DataMatrixOptions{}); err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := e.GS1DataMatrix(in, DataMatrixOptions{}); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkEncoderGS1DataMatrixSmall(b *testing.B) { benchEncoder(b, benchSmall) }
+func BenchmarkEncoderGS1DataMatrixLarge(b *testing.B) { benchEncoder(b, benchLarge) }
+
+func BenchmarkEncoderPlaceLarge(b *testing.B) {
+	s, _, full := benchStages(b, benchLarge)
+	var e Encoder
+	tab := e.layout(s)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		dmPlaceLayout(tab, full, s)
+	}
+}
