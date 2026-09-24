@@ -16,6 +16,15 @@ symbols collect in a gallery; click one to load it. *calm* and *fast* type
 visibly; *turbo* encodes whole labels as fast as the frame allows and shows
 the throughput. Typing yourself stops the demo.
 
+While the demo runs, **live statistics** summarize what it generated: which
+of the 30 sizes the encoder picked, how full each symbol's data area is
+(always at least ~60%, because the encoder picks the smallest size that
+fits and each size holds at most ~1.6x the previous one), how many
+codewords digit-pair compaction saved, the AI mix, and throughput over the
+last 30 seconds. The demo counts codewords itself (`stats.go`), because the
+package keeps its codeword stream private, and checks every count against
+the size the encoder chose.
+
 While the input is not a valid element string yet, the last symbol stays
 faded and the parser's error explains what is missing. The input is kept in
 the URL hash, so a symbol can be shared as a link.

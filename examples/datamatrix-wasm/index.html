@@ -72,7 +72,27 @@
   .tile svg { display: block; width: 100%; height: auto; image-rendering: pixelated; }
   .tile span { display: block; font: 10px ui-monospace, monospace; color: var(--muted); text-align: center; margin-top: 4px; }
   @keyframes pop { from { transform: scale(.4) translateY(-12px); opacity: 0; } to { transform: none; opacity: 1; } }
-  @media (max-width: 700px) { .out { grid-template-columns: 1fr; } }
+  .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 18px; }
+  .kpi { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+  .kpi b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
+  .kpi span { color: var(--muted); font-size: 12px; }
+  .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 18px 26px; }
+  .stack { display: flex; flex-direction: column; gap: 18px; }
+  .charts h3 { font-size: 13px; margin: 0 0 8px; }
+  .charts h3 small { display: block; font-weight: 400; color: var(--muted); font-size: 11px; }
+  .hbars { display: grid; grid-template-columns: 64px 1fr 44px; gap: 4px 8px; align-items: center; font-size: 12px; }
+  .hbars .l { font-family: ui-monospace, monospace; color: var(--ink); }
+  .hbars .t { height: 12px; background: #f6f2fa; border-radius: 4px; overflow: hidden; }
+  .hbars .f { height: 100%; background: linear-gradient(90deg, var(--accent), var(--pink)); border-radius: 4px; transition: width .25s; }
+  .hbars .f.r { background: linear-gradient(90deg, #8fd3c1, #7fb7e8); }
+  .hbars .n { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .vbars { display: flex; align-items: flex-end; gap: 3px; height: 90px; border-bottom: 1px solid var(--line); }
+  .vbars div { flex: 1; background: linear-gradient(0deg, var(--accent), var(--pink)); border-radius: 3px 3px 0 0; transition: height .25s; min-height: 1px; }
+  .axis { display: flex; justify-content: space-between; color: var(--muted); font-size: 10px; margin-top: 3px; }
+  #c-rate { width: 100%; height: 90px; border-bottom: 1px solid var(--line); }
+  #check { font-size: 12px; }
+  #check.ok { color: var(--good); } #check.bad { color: var(--bad); }
+  @media (max-width: 700px) { .out, .charts { grid-template-columns: 1fr; } .kpis { grid-template-columns: 1fr 1fr; } }
 </style>
 </head>
 <body>
@@ -118,6 +138,26 @@
       </div>
       <table id="els"></table>
       <p class="foot" id="foot"></p>
+    </div>
+  </section>
+
+  <section class="card" id="stats-card" hidden>
+    <div class="gallery-head"><b>live statistics</b><span id="check"></span></div>
+    <div class="kpis">
+      <div class="kpi"><b id="k-labels">0</b><span>labels generated</span></div>
+      <div class="kpi"><b id="k-modules">0</b><span>modules placed</span></div>
+      <div class="kpi"><b id="k-fill">–</b><span>data capacity used, on average</span></div>
+      <div class="kpi"><b id="k-saved">–</b><span>fewer codewords from digit pairs</span></div>
+    </div>
+    <div class="charts">
+      <div><h3>symbol size <small>which of the 30 sizes the encoder picked (teal: rectangular)</small></h3><div id="c-sizes" class="hbars"></div></div>
+      <div class="stack">
+        <div><h3>capacity used <small>data codewords / size capacity; the rest is padding</small></h3><div id="c-fill" class="vbars"></div>
+          <div class="axis"><span>0%</span><span>50%</span><span>100%</span></div></div>
+        <div><h3>symbols per second <small>last 30 s</small></h3><svg id="c-rate" viewBox="0 0 300 90" preserveAspectRatio="none"></svg>
+          <div class="axis"><span>−30 s</span><span id="rate-now"></span><span>now</span></div></div>
+        <div><h3>application identifiers <small>share of labels carrying each AI</small></h3><div id="c-ais" class="hbars"></div></div>
+      </div>
     </div>
   </section>
 
@@ -260,6 +300,8 @@ function startDemo() {
   $("play").textContent = "■ stop";
   $("play").classList.add("running");
   $("gallery-card").hidden = false;
+  $("stats-card").hidden = false;
+  resetStats();
   job = null;
   frame = requestAnimationFrame(tick);
 }
@@ -267,6 +309,7 @@ function stopDemo() {
   if (!running) return;
   running = false;
   document.body.classList.remove("demo-on");
+  drawStats();
   cancelAnimationFrame(frame);
   $("play").textContent = "▶ demo mode";
   $("play").classList.remove("running");
@@ -328,12 +371,13 @@ function finishLabel(value, onScreen) {
     r = render(true);
     $("sym").classList.remove("done"); void $("sym").offsetWidth; $("sym").classList.add("done");
   } else {
-    r = gs1dm(value, opts);
+    r = gs1dm(value, { ...opts, stats: true });
     lastTurbo = { value, r };
   }
   stats.encodes++;
   if (r.error) return r;
   stats.symbols++;
+  record(value, onScreen ? gs1dm(value, { ...opts, stats: true }) : r);
   if (onScreen) addTile(value, r, rect.checked);
   return r;
 }
@@ -343,6 +387,105 @@ function showLast() {
   input.value = lastTurbo.value;
   render(false);
 }
+
+// ---- live statistics --------------------------------------------------------
+
+// Data codewords per size, in the encoder's order, to check each count: the
+// chosen size must hold it and the next smaller size of that shape must not.
+const CAPS = {
+  square: [3, 5, 8, 12, 18, 22, 30, 36, 44, 62, 86, 114, 144, 174, 204, 280, 368, 456, 576, 696, 816, 1050, 1304, 1558],
+  rect: [5, 10, 16, 22, 32, 49],
+};
+const AI_NAMES = { "00": "SSCC", "01": "GTIN", "10": "lot", "11": "prod. date", "17": "expiry", "21": "serial", "30": "count" };
+let S;
+function resetStats() {
+  S = { n: 0, modules: 0, rect: 0, cw: 0, cap: 0, pairs: 0, fill: Array(10).fill(0), sizes: new Map(),
+    ais: new Map(), consistent: 0, rate: [], lastSymbols: 0 };
+}
+resetStats();
+
+function record(value, r) {
+  S.n++;
+  S.modules += r.rows * r.cols;
+  const isRect = r.rows !== r.cols;
+  if (isRect) S.rect++;
+  S.cw += r.codewords; S.cap += r.capacity; S.pairs += r.digitPairs;
+  S.fill[Math.min(9, Math.floor((r.codewords / r.capacity) * 10))]++;
+  const key = r.rows + "×" + r.cols;
+  const e = S.sizes.get(key) || { n: 0, cap: r.capacity + (isRect ? 1e4 : 0), rect: isRect };
+  e.n++; S.sizes.set(key, e);
+  const seen = new Set();
+  for (const m of value.matchAll(/\((\d{2,4})\)/g)) {
+    const ai = m[1].startsWith("9") ? "9x" : m[1];
+    if (seen.has(ai)) continue;
+    seen.add(ai);
+    S.ais.set(ai, (S.ais.get(ai) || 0) + 1);
+  }
+  const caps = CAPS[isRect ? "rect" : "square"];
+  const i = caps.indexOf(r.capacity);
+  if (i >= 0 && r.codewords <= caps[i] && (i === 0 || r.codewords > caps[i - 1])) S.consistent++;
+}
+
+function hbars(el, rows, total, maxN) {
+  el.replaceChildren();
+  for (const [label, n, cls] of rows) {
+    const l = document.createElement("span"); l.className = "l"; l.textContent = label;
+    const t = document.createElement("div"); t.className = "t";
+    const f = document.createElement("div"); f.className = "f" + (cls ? " " + cls : "");
+    f.style.width = (n / maxN * 100).toFixed(1) + "%"; t.append(f);
+    const c = document.createElement("span"); c.className = "n"; const pct = n / total * 100;
+    c.textContent = pct > 0 && pct < 1 ? "<1%" : pct.toFixed(0) + "%";
+    el.append(l, t, c);
+  }
+}
+
+function drawStats() {
+  if (!S.n) return;
+  $("k-labels").textContent = S.n.toLocaleString();
+  const mods = S.modules;
+  $("k-modules").textContent = mods >= 1e6 ? (mods / 1e6).toFixed(2) + " M" : mods.toLocaleString();
+  $("k-fill").textContent = (S.cw / S.cap * 100).toFixed(0) + "%";
+  $("k-saved").textContent = (S.pairs / (S.cw + S.pairs) * 100).toFixed(0) + "%";
+
+  const sizes = [...S.sizes.entries()].sort((a, b) => a[1].cap - b[1].cap);
+  hbars($("c-sizes"), sizes.map(([k, e]) => [k, e.n, e.rect ? "r" : ""]), S.n, Math.max(...sizes.map(([, e]) => e.n)));
+
+  const maxF = Math.max(...S.fill);
+  $("c-fill").replaceChildren(...S.fill.map((n, i) => {
+    const d = document.createElement("div");
+    d.style.height = (n / maxF * 100).toFixed(1) + "%";
+    d.title = i * 10 + "–" + (i + 1) * 10 + "% full: " + n;
+    return d;
+  }));
+
+  const order = ["01", "17", "10", "21", "11", "30", "00", "9x"];
+  const ais = order.filter((a) => S.ais.has(a)).map((a) => ["(" + a + ")", S.ais.get(a)]);
+  hbars($("c-ais"), ais.map(([a, n]) => [a, n]), S.n, S.n);
+  [...$("c-ais").querySelectorAll(".l")].forEach((l) => {
+    const a = l.textContent.slice(1, -1);
+    l.title = AI_NAMES[a] || (a === "9x" ? "internal (90–99)" : "");
+  });
+
+  const pts = S.rate, max = Math.max(1, ...pts);
+  $("c-rate").innerHTML = pts.length < 2 ? "" :
+    '<polyline fill="none" stroke="#b596e8" stroke-width="2" vector-effect="non-scaling-stroke" points="' +
+    pts.map((v, i) => (i / 59 * 300).toFixed(1) + "," + (88 - v / max * 84).toFixed(1)).join(" ") + '"/>';
+  $("rate-now").textContent = pts.length ? pts[pts.length - 1].toLocaleString() + "/s (max " + max.toLocaleString() + ")" : "";
+
+  const chk = $("check");
+  chk.className = S.consistent === S.n ? "ok" : "bad";
+  chk.textContent = (S.consistent === S.n ? "✓ " : "✗ ") + S.consistent.toLocaleString() + " / " + S.n.toLocaleString() +
+    " codeword counts match the size the encoder chose";
+}
+
+// Throughput sampled twice a second, stats redrawn five times a second.
+setInterval(() => {
+  if (!running) return;
+  S.rate.push((stats.symbols - S.lastSymbols) * 2);
+  S.lastSymbols = stats.symbols;
+  if (S.rate.length > 60) S.rate.shift();
+}, 500);
+setInterval(() => { if (running) drawStats(); }, 200);
 
 const MAX_TILES = 48;
 function addTile(value, r, isRect) {

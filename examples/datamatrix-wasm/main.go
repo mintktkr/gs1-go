@@ -25,8 +25,9 @@ const minBench = 3 * time.Millisecond
 // headless browsers with virtual time.
 const maxBench = 100000
 
-// gs1dm(input, {gs1, rect, cache, bench}) returns {svg, rows, cols, elements,
-// error}, plus {perOpNs, iters} when bench is set.
+// gs1dm(input, {gs1, rect, cache, bench, stats}) returns {svg, rows, cols,
+// elements, error}, plus {perOpNs, iters} when bench is set and {codewords,
+// digitPairs, capacity} when stats is set.
 func gs1dm(_ js.Value, args []js.Value) any {
 	input := args[0].String()
 	opts := args[1]
@@ -56,6 +57,12 @@ func gs1dm(_ js.Value, args []js.Value) any {
 		"rows":     m.Rows,
 		"cols":     m.Cols,
 		"elements": elements(input, isGS1),
+	}
+	if opts.Get("stats").Truthy() {
+		n, pairs := codewords(input, isGS1)
+		res["codewords"] = n
+		res["digitPairs"] = pairs
+		res["capacity"] = capacity[m.Rows*1000+m.Cols]
 	}
 	if !opts.Get("bench").Truthy() {
 		return res
