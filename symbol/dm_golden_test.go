@@ -1,7 +1,6 @@
 package symbol
 
 import (
-	"bufio"
 	"os"
 	"strconv"
 	"strings"
@@ -19,15 +18,12 @@ type goldenCase struct {
 
 func loadGolden(t *testing.T) []goldenCase {
 	t.Helper()
-	f, err := os.Open("testdata/datamatrix-golden.txt")
+	data, err := os.ReadFile("testdata/datamatrix-golden.txt")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
 	var cases []goldenCase
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		line := sc.Text()
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
 		switch {
 		case strings.HasPrefix(line, "#"):
 		case strings.HasPrefix(line, "case "):
@@ -41,9 +37,6 @@ func loadGolden(t *testing.T) []goldenCase {
 			c := &cases[len(cases)-1]
 			c.rows = append(c.rows, strings.ReplaceAll(line, " ", ""))
 		}
-	}
-	if err := sc.Err(); err != nil {
-		t.Fatal(err)
 	}
 	return cases
 }
