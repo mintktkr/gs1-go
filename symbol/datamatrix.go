@@ -23,35 +23,62 @@ type DataMatrixOptions struct {
 // The input accepts anything gs1.Parse accepts, including bracket notation
 // such as "(01)04150000021126(17)250630(10)ABC123". The element string is
 // validated by parsing before encoding, and FNC1 is placed after every
-// element whose AI is not of predefined length, except the last.
+// element whose AI is not of predefined length, except the last. An Encoder
+// encodes the same way and is faster when the same size is encoded again.
 func GS1DataMatrix(input string, opts DataMatrixOptions) (*Matrix, error) {
-	b, err := gs1.Parse(input)
+	cw, err := gs1Codewords(input)
 	if err != nil {
 		return nil, err
 	}
-	cw, err := dmEncodeASCII(elementString(b.Elements), true)
-	if err != nil {
-		return nil, err
-	}
-	return encodeDataMatrix(cw, opts)
+	return encodeDataMatrix(cw, opts, nil)
 }
 
 // DataMatrix encodes arbitrary data as a plain (non-GS1) ECC 200 Data Matrix
-// symbol. Bytes above 127 are encoded with the upper shift codeword.
+// symbol. Bytes above 127 are encoded with the upper shift codeword. An
+// Encoder encodes the same way and is faster when the same size is encoded
+// again.
 func DataMatrix(data string, opts DataMatrixOptions) (*Matrix, error) {
 	cw, err := dmEncodeASCII(data, false)
 	if err != nil {
 		return nil, err
 	}
-	return encodeDataMatrix(cw, opts)
+	return encodeDataMatrix(cw, opts, nil)
 }
 
-func encodeDataMatrix(cw []byte, opts DataMatrixOptions) (*Matrix, error) {
+// gs1Codewords encodes a GS1 element string as the codeword stream of a GS1
+// Data Matrix symbol.
+func gs1Codewords(input string) ([]byte, error) {
+	b, err := gs1.Parse(input)
+	if err != nil {
+		return nil, err
+	}
+	return dmEncodeASCII(elementString(b.Elements), true)
+}
+
+// encodeDataMatrix pads and protects cw, then places it in the smallest size
+// opts allows. A nil e places the symbol directly, a non-nil one uses e's
+// cached module layout of that size.
+func encodeDataMatrix(cw []byte, opts DataMatrixOptions, e *Encoder) (*Matrix, error) {
 	s, err := dmSelectSize(len(cw), opts.Rectangular)
 	if err != nil {
 		return nil, err
 	}
-	return dmPlace(dmECC(dmPad(cw, s.DataCW), s), s), nil
+	full := dmECC(dmPad(cw, s.DataCW), s)
+	if e == nil {
+		return dmPlace(full, s), nil
+	}
+	return dmPlaceLayout(e.layout(s), full, s), nil
+}
+
+// dmSizeIndex returns the position of s in dmSizes, which every size handed
+// to it was selected from.
+func dmSizeIndex(s dmSize) int {
+	for i := range dmSizes {
+		if dmSizes[i] == s {
+			return i
+		}
+	}
+	panic("symbol: symbol size is not in dmSizes")
 }
 
 // elementString joins elements with FNC1 (ASCII 29) after each
@@ -107,8 +134,9 @@ func (s dmSize) mappingSize() (rows, cols int) {
 }
 
 // dmSizes lists the 24 square sizes followed by the 6 rectangular sizes,
-// each group in increasing capacity.
-var dmSizes = []dmSize{
+// each group in increasing capacity. It is an array so that Encoder can size
+// its cache from it.
+var dmSizes = [...]dmSize{
 	{10, 10, 8, 8, 3, 5, 1},
 	{12, 12, 10, 10, 5, 7, 1},
 	{14, 14, 12, 12, 8, 10, 1},
