@@ -7,6 +7,7 @@
 //	gs1 gtin GTIN
 //	gs1 sscc -ext DIGIT -gcp PREFIX -serial REFERENCE
 //	gs1 ai CODE
+//	gs1 datamatrix [-o FILE] [-scale N] [-quiet N] [-rect] BARCODE
 //	gs1 version
 //
 // When BARCODE is omitted, parse reads one barcode per line from stdin
@@ -21,10 +22,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime/debug"
 	"strings"
 
 	"github.com/galenzo17/gs1-go"
+	"github.com/galenzo17/gs1-go/symbol"
 )
 
 // version is set by the linker for release builds; otherwise it is derived
@@ -49,6 +52,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return runSSCC(args[1:], stdout, stderr)
 	case "ai":
 		return runAI(args[1:], stdout, stderr)
+	case "datamatrix":
+		return runDataMatrix(args[1:], stdout, stderr)
 	case "version":
 		fmt.Fprintln(stdout, "gs1", resolveVersion())
 		return 0
@@ -70,6 +75,7 @@ Usage:
   gs1 gtin GTIN
   gs1 sscc -ext DIGIT -gcp PREFIX -serial REFERENCE
   gs1 ai CODE
+  gs1 datamatrix [-o FILE] [-scale N] [-quiet N] [-rect] BARCODE
   gs1 version
 
 Commands:
@@ -78,6 +84,9 @@ Commands:
   gtin     Validate the check digit of a GTIN-8/12/13/14.
   sscc     Build an 18-digit Serial Shipping Container Code.
   ai       Show name and format of an Application Identifier.
+  datamatrix
+           Render a GS1 DataMatrix symbol as SVG (stdout, or -o FILE) or as
+           PNG when FILE ends in .png.
   version  Print the build version.
 
 Regulators for -validate: anvisa, anmat, snfa, cofepris
@@ -312,4 +321,50 @@ func resolveVersion() string {
 		return info.Main.Version
 	}
 	return "devel"
+}
+
+func runDataMatrix(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("gs1 datamatrix", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	out := fs.String("o", "", "write to `FILE`; PNG when it ends in .png, SVG otherwise")
+	scale := fs.Int("scale", 10, "pixels per module")
+	quiet := fs.Int("quiet", 1, "quiet zone in modules")
+	rect := fs.Bool("rect", false, "use a rectangular symbol")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 1 {
+		fmt.Fprintln(stderr, "usage: gs1 datamatrix [-o FILE] [-scale N] [-quiet N] [-rect] BARCODE")
+		return 2
+	}
+	m, err := symbol.GS1DataMatrix(fs.Arg(0), symbol.DataMatrixOptions{Rectangular: *rect})
+	if err != nil {
+		fmt.Fprintln(stderr, "gs1:", err)
+		return 1
+	}
+	if *out == "" {
+		fmt.Fprint(stdout, m.SVG(*scale, *quiet))
+		return 0
+	}
+	if err := writeSymbol(*out, m, *scale, *quiet); err != nil {
+		fmt.Fprintln(stderr, "gs1:", err)
+		return 1
+	}
+	return 0
+}
+
+func writeSymbol(path string, m *symbol.Matrix, scale, quiet int) error {
+	f, err := os.Create(filepath.Clean(path))
+	if err != nil {
+		return err
+	}
+	if strings.EqualFold(filepath.Ext(path), ".png") {
+		err = m.PNG(f, scale, quiet)
+	} else {
+		_, err = io.WriteString(f, m.SVG(scale, quiet))
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	return err
 }
