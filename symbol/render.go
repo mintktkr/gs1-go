@@ -5,6 +5,7 @@ import (
 	"image/png"
 	"io"
 	"strconv"
+	"sync"
 )
 
 // Image renders the matrix as a grayscale image, scale pixels per module with
@@ -35,8 +36,29 @@ func (m *Matrix) Image(scale, quiet int) *image.Gray {
 
 // PNG writes the matrix as a PNG image; see Image for the parameters.
 func (m *Matrix) PNG(w io.Writer, scale, quiet int) error {
-	return png.Encode(w, m.Image(scale, quiet))
+	return pngEncoder.Encode(w, m.Image(scale, quiet))
 }
+
+// pngEncoder writes every PNG and reuses its buffers through pngBufferPool.
+// Encoding allocates far more scratch space than it produces: deflate alone
+// keeps about 600 KiB of hash tables, so paying for them once per process
+// instead of once per image is most of the cost of a small PNG.
+var pngEncoder = png.Encoder{BufferPool: &pngBufferPool{
+	pool: sync.Pool{New: func() any { return new(png.EncoderBuffer) }},
+}}
+
+// pngBufferPool is a png.EncoderBufferPool over a sync.Pool. A sync.Pool is
+// safe for concurrent use and a buffer is only held by the pool or by one
+// Encode call at a time, so the package-level pngEncoder is too. Encoder
+// state that is not reset per call (the last image and writer) stays
+// reachable from the pool until the next encode reuses the buffer.
+type pngBufferPool struct{ pool sync.Pool }
+
+// Get returns a buffer for one Encode call.
+func (p *pngBufferPool) Get() *png.EncoderBuffer { return p.pool.Get().(*png.EncoderBuffer) }
+
+// Put returns a buffer from a finished Encode call to the pool.
+func (p *pngBufferPool) Put(b *png.EncoderBuffer) { p.pool.Put(b) }
 
 // SVG returns the matrix as a standalone SVG document; see Image for the
 // parameters. One user unit equals one pixel at the given scale. The document

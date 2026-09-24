@@ -7,6 +7,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"sync"
 	"testing"
 )
 
@@ -243,4 +244,33 @@ func TestRenderSVG(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRenderPNGConcurrent(t *testing.T) {
+	// PNG shares one encoder and its buffer pool across goroutines; every
+	// call must still return the same bytes.
+	m := renderMatrix("##.", "..#", ".#.")
+	var want bytes.Buffer
+	if err := m.PNG(&want, 3, 2); err != nil {
+		t.Fatalf("PNG() error = %v", err)
+	}
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 8; j++ {
+				var got bytes.Buffer
+				if err := m.PNG(&got, 3, 2); err != nil {
+					t.Errorf("PNG() error = %v", err)
+					return
+				}
+				if !bytes.Equal(got.Bytes(), want.Bytes()) {
+					t.Errorf("concurrent PNG() returned %d bytes, want %d", got.Len(), want.Len())
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
 }
