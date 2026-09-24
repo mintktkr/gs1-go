@@ -2,10 +2,12 @@ package symbol
 
 import (
 	"image"
+	"image/color"
 	"image/png"
 	"io"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // Image renders the matrix as a grayscale image, scale pixels per module with
@@ -16,8 +18,60 @@ import (
 func (m *Matrix) Image(scale, quiet int) *image.Gray {
 	scale, quiet = renderParams(scale, quiet)
 	img := image.NewGray(image.Rect(0, 0, (m.Cols+2*quiet)*scale, (m.Rows+2*quiet)*scale))
-	for i := range img.Pix {
-		img.Pix[i] = 0xFF
+	m.draw(img.Pix, img.Stride, scale, quiet, 0xFF, 0)
+	return img
+}
+
+// PNG writes the matrix as a PNG image; see Image for the parameters.
+func (m *Matrix) PNG(w io.Writer, scale, quiet int) error {
+	return pngEncoder.Encode(w, m.pngImage(scale, quiet))
+}
+
+// pngEncoder writes every PNG and reuses its buffers through pngBufferPool.
+// Encoding allocates far more scratch space than it produces: deflate alone
+// keeps about 600 KiB of hash tables, so paying for them once per process
+// instead of once per image is most of the cost of a small PNG.
+var pngEncoder = png.Encoder{BufferPool: &pngBufferPool{
+	pool: sync.Pool{New: func() any { return new(png.EncoderBuffer) }},
+}}
+
+// pngBufferPool is a png.EncoderBufferPool over a sync.Pool. A sync.Pool is
+// safe for concurrent use and a buffer is only held by the pool or by one
+// Encode call at a time, so the package-level pngEncoder is too. Encoder
+// state that is not reset per call (the last image and writer) stays
+// reachable from the pool until the next encode reuses the buffer.
+type pngBufferPool struct{ pool sync.Pool }
+
+// Get returns a buffer for one Encode call.
+func (p *pngBufferPool) Get() *png.EncoderBuffer { return p.pool.Get().(*png.EncoderBuffer) }
+
+// Put returns a buffer from a finished Encode call to the pool.
+func (p *pngBufferPool) Put(b *png.EncoderBuffer) { p.pool.Put(b) }
+
+// pngPalette holds the only two colors a rendered symbol uses: index pngWhite
+// is the light module and the quiet zone, index pngBlack the dark module. Two
+// entries are what make the PNG encoder write a bit depth 1 image, so filter
+// and deflate see eight times fewer bytes than on the grayscale Image.
+var pngPalette = color.Palette{color.Gray{Y: 0}, color.Gray{Y: 0xFF}}
+
+const (
+	pngBlack = 0
+	pngWhite = 1
+)
+
+// pngImage renders the same picture as Image as a two-color paletted image.
+func (m *Matrix) pngImage(scale, quiet int) *image.Paletted {
+	scale, quiet = renderParams(scale, quiet)
+	img := image.NewPaletted(image.Rect(0, 0, (m.Cols+2*quiet)*scale, (m.Rows+2*quiet)*scale), pngPalette)
+	m.draw(img.Pix, img.Stride, scale, quiet, pngWhite, pngBlack)
+	return img
+}
+
+// draw fills the pixmap pix, whose rows are stride bytes apart, with light and
+// writes every dark module as a scale x scale rectangle of dark.
+func (m *Matrix) draw(pix []byte, stride, scale, quiet int, light, dark byte) {
+	for i := range pix {
+		pix[i] = light
 	}
 	for row := 0; row < m.Rows; row++ {
 		top := (row + quiet) * scale
@@ -27,16 +81,13 @@ func (m *Matrix) Image(scale, quiet int) *image.Gray {
 			}
 			left := (col + quiet) * scale
 			for y := top; y < top+scale; y++ {
-				clear(img.Pix[y*img.Stride+left : y*img.Stride+left+scale])
+				line := pix[y*stride+left : y*stride+left+scale]
+				for i := range line {
+					line[i] = dark
+				}
 			}
 		}
 	}
-	return img
-}
-
-// PNG writes the matrix as a PNG image; see Image for the parameters.
-func (m *Matrix) PNG(w io.Writer, scale, quiet int) error {
-	return png.Encode(w, m.Image(scale, quiet))
 }
 
 // SVG returns the matrix as a standalone SVG document; see Image for the
