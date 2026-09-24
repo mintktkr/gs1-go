@@ -6,6 +6,34 @@ package symbol
 // product of two logs never need a reduction.
 var dmGFExp, dmGFLog = dmGaloisTables()
 
+// dmMaxECC is the largest number of ECC codewords per block in dmSizes. It
+// bounds the degree index into dmGenLog.
+const dmMaxECC = 68
+
+// dmGenLog holds the generator polynomial of degree n in log form for every
+// ECC codelength dmSizes uses: dmGenLog[n][i] is log(g_i), the coefficient of
+// x^(n-i) for i in 1..n. The leading coefficient g_0 is 1 and is not stored.
+// Degrees no size uses stay nil. The polynomials have no zero coefficients,
+// so the log form loses nothing; TestDMGenLog checks both properties.
+//
+// dmGenerators fills it at init and nothing writes to it afterwards, so
+// concurrent reads are safe.
+var dmGenLog = dmGenerators()
+
+// dmGenerators builds the generator polynomials for the degrees dmSizes
+// uses, g(x) = (x-a^1)(x-a^2)...(x-a^n) for n ECC codewords (ISO/IEC 16022
+// 5.7).
+func dmGenerators() [dmMaxECC + 1][]byte {
+	var gen [dmMaxECC + 1][]byte
+	for _, s := range dmSizes {
+		n := s.ECCCW / s.Blocks
+		if gen[n] == nil {
+			gen[n] = dmGeneratorLog(n)
+		}
+	}
+	return gen
+}
+
 // dmGaloisTables builds the log and antilog tables of GF(256) by repeated
 // multiplication by alpha.
 func dmGaloisTables() (exp [512]byte, log [256]byte) {
@@ -49,23 +77,35 @@ func dmGenerator(n int) []byte {
 	return g
 }
 
-// dmBlockECC returns the remainder of block(x) * x^n divided by gen(x), the
-// ECC codewords of one Reed-Solomon block, highest degree first. gen must
-// have n+1 coefficients with a leading 1.
-func dmBlockECC(block, gen []byte) []byte {
-	n := len(gen) - 1
-	rem := make([]byte, n)
+// dmGeneratorLog returns dmGenerator(n) in log form, without the leading 1.
+func dmGeneratorLog(n int) []byte {
+	g := dmGenerator(n)
+	logs := make([]byte, n)
+	for i := range logs {
+		logs[i] = dmGFLog[g[i+1]]
+	}
+	return logs
+}
+
+// dmBlockECC writes the ECC codewords of one Reed-Solomon block into rem,
+// which must have len(glog) bytes: the remainder of block(x) * x^n divided by
+// the generator polynomial, highest degree first. glog is the generator in
+// log form, so each term costs one antilog lookup instead of a full multiply.
+func dmBlockECC(block, glog, rem []byte) {
+	n := len(glog)
+	clear(rem)
 	for _, c := range block {
 		factor := c ^ rem[0]
 		copy(rem, rem[1:])
 		rem[n-1] = 0
-		if factor != 0 {
-			for j := 1; j <= n; j++ {
-				rem[j-1] ^= dmMul(gen[j], factor)
-			}
+		if factor == 0 {
+			continue
+		}
+		logF := int(dmGFLog[factor])
+		for j, logG := range glog {
+			rem[j] ^= dmGFExp[logF+int(logG)]
 		}
 	}
-	return rem
 }
 
 // dmECC computes Reed-Solomon error correction for data (already padded to
@@ -75,14 +115,16 @@ func dmECC(data []byte, s dmSize) []byte {
 	copy(out, data)
 	blocks := s.Blocks
 	n := s.ECCCW / blocks
-	gen := dmGenerator(n)
+	glog := dmGenLog[n]
+	rem := make([]byte, n)
 	var block []byte
 	for b := 0; b < blocks; b++ {
 		block = block[:0]
 		for i := b; i < s.DataCW; i += blocks {
 			block = append(block, data[i])
 		}
-		for j, ecc := range dmBlockECC(block, gen) {
+		dmBlockECC(block, glog, rem)
+		for j, ecc := range rem {
 			out[dmECCPos(s, b, j)] = ecc
 		}
 	}
