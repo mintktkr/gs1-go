@@ -17,8 +17,9 @@ combine a parser, an encoder and an unrelated renderer. FNC1 placement is
 where those combinations break.
 
 A dependency-free GS1 DataMatrix encoder was built on a fork to test the
-cost: about 700 lines of non-test code, verified against zint module for
-module and decoded by zxing-cpp.
+cost: about 700 lines of non-test code for the encoder and renderers, 1,050
+with the performance work and the opt-in `Encoder`. It is verified against
+zint module for module and decoded by zxing-cpp.
 
 ## Decision
 
