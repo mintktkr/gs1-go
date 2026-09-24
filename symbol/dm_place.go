@@ -1,49 +1,100 @@
 package symbol
 
+import "sync"
+
 // dmPlace lays the final codeword stream (data + ECC) into a symbol of size
-// s, including finder and alignment patterns.
+// s, including finder and alignment patterns. The layout depends only on the
+// size, never on the data, so it comes from the size's placement table.
 func dmPlace(cw []byte, s dmSize) *Matrix {
-	m := dmMappingOf(cw, s)
+	tab := dmPlaceTable(s)
 	out := newMatrix(s.Rows, s.Cols)
-	v, h := s.regions()
-	for r := 0; r < v; r++ {
-		for c := 0; c < h; c++ {
-			dmRegion(out, m, s, r, c)
+	for i, e := range tab {
+		if e < dmPlaceFixed {
+			out.mods[i] = cw[e>>3]>>(7-(e&7))&1 != 0
+		} else {
+			out.mods[i] = e == dmPlaceDark
 		}
 	}
 	return out
 }
 
-// dmRegion writes the data region at region coordinates r, c: its finder and
-// alignment pattern, then the mapping modules it carries. Region (r, c)
-// starts at symbol row r*(RegionRows+2), column c*(RegionCols+2).
-func dmRegion(out *Matrix, m *dmMapping, s dmSize, r, c int) {
-	row := r * (s.RegionRows + 2)
-	col := c * (s.RegionCols + 2)
-	dmFinder(out, row, col, s.RegionRows+2, s.RegionCols+2)
-	for i := 0; i < s.RegionRows; i++ {
-		for j := 0; j < s.RegionCols; j++ {
-			out.set(row+1+i, col+1+j, m.get(r*s.RegionRows+i, c*s.RegionCols+j) == 1)
-		}
+// A placement table entry says what its module holds: bit e&7 (0 = most
+// significant) of codeword e>>3, a fixed light module, or a fixed dark one
+// (finder, alignment, corner). The largest symbol, 144x144, has 2178
+// codewords, so no codeword bit reaches dmPlaceLight.
+const (
+	dmPlaceLight uint16 = 0xFFFE
+	dmPlaceDark  uint16 = 0xFFFF
+	dmPlaceFixed uint16 = dmPlaceLight // entries from here up carry no bit
+)
+
+var (
+	dmPlaceTablesMu sync.RWMutex
+	dmPlaceTables   = map[dmSize][]uint16{}
+)
+
+// dmPlaceTable returns the placement table of s, building it on first use.
+// A table is never modified once built, so all encoders can share it.
+func dmPlaceTable(s dmSize) []uint16 {
+	dmPlaceTablesMu.RLock()
+	tab := dmPlaceTables[s]
+	dmPlaceTablesMu.RUnlock()
+	if tab != nil {
+		return tab
 	}
+	dmPlaceTablesMu.Lock()
+	defer dmPlaceTablesMu.Unlock()
+	if tab = dmPlaceTables[s]; tab == nil {
+		tab = buildDMPlaceTable(s)
+		dmPlaceTables[s] = tab
+	}
+	return tab
 }
 
-// dmFinder draws one data region's finder and alignment pattern at row, col:
-// a solid left column and bottom row, and clock tracks of every other module
-// dark along the top row (starting dark) and the right column (starting
-// light) (ISO/IEC 16022 figure 3).
-func dmFinder(out *Matrix, row, col, rows, cols int) {
+// buildDMPlaceTable walks the mapping matrix of ISO/IEC 16022 Annex F once,
+// over zero data, and records for every symbol module which codeword bit it
+// carries, or that it is a fixed finder, alignment or corner module. The walk
+// places modules by position only, so the result holds for any data.
+func buildDMPlaceTable(s dmSize) []uint16 {
+	m := dmMappingOf(make([]byte, s.DataCW+s.ECCCW), s)
+	tab := make([]uint16, s.Rows*s.Cols)
+	for i := range tab {
+		tab[i] = dmPlaceLight
+	}
+	v, h := s.regions()
+	for r := 0; r < v; r++ {
+		for c := 0; c < h; c++ {
+			row := r * (s.RegionRows + 2)
+			col := c * (s.RegionCols + 2)
+			dmFinderDark(tab, s.Cols, row, col, s.RegionRows+2, s.RegionCols+2)
+			for i := 0; i < s.RegionRows; i++ {
+				for j := 0; j < s.RegionCols; j++ {
+					tab[(row+1+i)*s.Cols+col+1+j] = m.pos[(r*s.RegionRows+i)*m.cols+c*s.RegionCols+j]
+				}
+			}
+		}
+	}
+	return tab
+}
+
+// dmFinderDark marks the finder and alignment pattern of one data region at
+// row, col in a placement table of the given width: a solid left column and
+// bottom row, and clock tracks of every other module dark along the top row
+// (starting dark) and the right column (starting light) (ISO/IEC 16022 figure
+// 3). The modules inside the pattern stay light here and are overwritten by
+// the mapping modules of the region.
+func dmFinderDark(tab []uint16, width, row, col, rows, cols int) {
 	for i := 0; i < rows; i++ {
-		out.set(row+i, col, true)
+		tab[(row+i)*width+col] = dmPlaceDark
 	}
 	for j := 0; j < cols; j++ {
-		out.set(row+rows-1, col+j, true)
+		tab[(row+rows-1)*width+col+j] = dmPlaceDark
 	}
 	for j := 0; j < cols; j += 2 {
-		out.set(row, col+j, true)
+		tab[row*width+col+j] = dmPlaceDark
 	}
 	for i := 1; i < rows; i += 2 {
-		out.set(row+i, col+cols-1, true)
+		tab[(row+i)*width+col+cols-1] = dmPlaceDark
 	}
 }
 
@@ -52,13 +103,14 @@ func dmFinder(out *Matrix, row, col, rows, cols int) {
 // bit.
 type dmMapping struct {
 	rows, cols int
-	val        []int8 // -1 until placed, afterwards the module value
-	used       int    // codewords consumed, must end up as len(cw)
-	writes     int    // modules written, must end up as rows*cols
+	val        []int8   // -1 until placed, afterwards the module value
+	pos        []uint16 // placement table entry of the module: codeword bit or fixed pattern
+	used       int      // codewords consumed, must end up as len(cw)
+	writes     int      // modules written, must end up as rows*cols
 }
 
 func newDMMapping(rows, cols int) *dmMapping {
-	m := &dmMapping{rows: rows, cols: cols, val: make([]int8, rows*cols)}
+	m := &dmMapping{rows: rows, cols: cols, val: make([]int8, rows*cols), pos: make([]uint16, rows*cols)}
 	for i := range m.val {
 		m.val[i] = -1
 	}
@@ -69,8 +121,10 @@ func (m *dmMapping) get(row, col int) int8 { return m.val[row*m.cols+col] }
 
 func (m *dmMapping) placed(row, col int) bool { return m.val[row*m.cols+col] >= 0 }
 
-func (m *dmMapping) set(row, col int, v int8) {
+// set places module row, col with value v and placement table entry pos.
+func (m *dmMapping) set(row, col int, v int8, pos uint16) {
 	m.val[row*m.cols+col] = v
+	m.pos[row*m.cols+col] = pos
 	m.writes++
 }
 
@@ -98,10 +152,10 @@ func dmMappingOf(cw []byte, s dmSize) *dmMapping {
 	// A symbol whose module count is not a multiple of 8 leaves these four
 	// modules of the last codeword group empty; they get a fixed pattern.
 	if !m.placed(nrow-1, ncol-1) {
-		m.set(nrow-1, ncol-1, 1)
-		m.set(nrow-2, ncol-2, 1)
-		m.set(nrow-1, ncol-2, 0)
-		m.set(nrow-2, ncol-1, 0)
+		m.set(nrow-1, ncol-1, 1, dmPlaceDark)
+		m.set(nrow-2, ncol-2, 1, dmPlaceDark)
+		m.set(nrow-1, ncol-2, 0, dmPlaceLight)
+		m.set(nrow-2, ncol-1, 0, dmPlaceLight)
 	}
 	return m
 }
@@ -156,7 +210,9 @@ func (m *dmMapping) corners(row, col int, cw []byte) {
 }
 
 // module places bit (1 = MSB, 8 = LSB) of codeword c at row, col, wrapping a
-// negative coordinate back into the matrix as Annex F specifies.
+// negative coordinate back into the matrix as Annex F specifies. It records
+// the module's placement table entry, bit bit-1 of codeword m.used-1, because
+// c is always the codeword next returned last.
 func (m *dmMapping) module(row, col int, c byte, bit uint) {
 	if row < 0 {
 		row += m.rows
@@ -170,7 +226,7 @@ func (m *dmMapping) module(row, col int, c byte, bit uint) {
 	if c>>(8-bit)&1 != 0 {
 		v = 1
 	}
-	m.set(row, col, v)
+	m.set(row, col, v, uint16(((m.used-1)*8+(int(bit)-1))&0xFFFF))
 }
 
 // utah places one codeword in the 8 module "utah" shape ending at row, col
