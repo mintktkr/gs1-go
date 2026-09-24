@@ -83,8 +83,20 @@ func dmECC(data []byte, s dmSize) []byte {
 			block = append(block, data[i])
 		}
 		for j, ecc := range dmBlockECC(block, gen) {
-			out[s.DataCW+j*blocks+b] = ecc
+			out[dmECCPos(s, b, j)] = ecc
 		}
 	}
 	return out
+}
+
+// dmECCPos returns the stream position of ECC codeword j of block b.
+//
+// When the data does not split evenly over the blocks (only 144x144: eight
+// blocks of 156 and two of 155), the ECC of the shorter blocks comes first.
+// A literal reading of ISO/IEC 16022 gives DataCW + j*Blocks + b, but the
+// deployed readers and encoders (zxing, libdmtx, BWIPP, zint) all use this
+// rotated layout; see https://github.com/zxing-cpp/zxing-cpp/issues/259.
+func dmECCPos(s dmSize, b, j int) int {
+	long := s.DataCW % s.Blocks
+	return s.DataCW + j*s.Blocks + (b+s.Blocks-long)%s.Blocks
 }
