@@ -14,6 +14,16 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - Identification AIs 253, 401, 8003, 8004, 8017 and 8018, with `GDTI()` and
   `GRAI()` accessors.
 - Missing-FNC1 recovery coverage for mixed-format identification AIs.
+- `symbol` package (prototype for #24): ECC 200 Data Matrix in all 24
+  square and 6 rectangular sizes, GS1 mode with FNC1 in first position.
+  `GS1DataMatrix` and `DataMatrix` return a `Matrix` rendered with `Image`,
+  `Paletted`, `PNG` or `SVG`.
+- `symbol.Encoder`, which caches module layouts per symbol size for
+  repeated encoding. The package functions keep no state.
+- `gs1 datamatrix` command writing SVG or PNG.
+- zint golden tests for every symbol size and `make verify-symbol`, which
+  decodes rendered symbols with zxing-cpp outside the module.
+- `docs/datamatrix.md` and `docs/performance.md`.
 
 ### Changed
 
