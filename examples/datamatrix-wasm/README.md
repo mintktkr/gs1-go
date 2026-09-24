@@ -9,6 +9,13 @@ keystroke re-encodes the symbol and shows:
 - the time of one encode plus drawing the SVG;
 - the symbol size and the parsed Application Identifiers.
 
+**Demo mode** (the ▶ button) invents realistic labels (GTINs with valid
+check digits, real dates, lots, serials, SSCCs, some rectangular, some that
+fill 144x144) and types them in, re-encoding on every character. Finished
+symbols collect in a gallery; click one to load it. *calm* and *fast* type
+visibly; *turbo* encodes whole labels as fast as the frame allows and shows
+the throughput. Typing yourself stops the demo.
+
 While the input is not a valid element string yet, the last symbol stays
 faded and the parser's error explains what is missing. The input is kept in
 the URL hash, so a symbol can be shared as a link.
