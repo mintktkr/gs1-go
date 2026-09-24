@@ -166,7 +166,11 @@ func (m *dmMapping) module(row, col int, c byte, bit uint) {
 		col += m.cols
 		row += 4 - (m.cols+4)%8
 	}
-	m.set(row, col, int8(c>>(8-bit))&1)
+	var v int8
+	if c>>(8-bit)&1 != 0 {
+		v = 1
+	}
+	m.set(row, col, v)
 }
 
 // utah places one codeword in the 8 module "utah" shape ending at row, col

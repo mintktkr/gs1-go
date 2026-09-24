@@ -62,7 +62,7 @@ func dmPad(cw []byte, capacity int) []byte {
 		if v > 254 {
 			v -= 254
 		}
-		out[p-1] = byte(v)
+		out[p-1] = byte(v & 0xFF) // v is in 1..254
 	}
 	return out
 }
