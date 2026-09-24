@@ -72,6 +72,16 @@ func BenchmarkPNGSmall(b *testing.B) {
 	}
 }
 
+func BenchmarkPNGLarge(b *testing.B) {
+	m := benchMatrix(b, benchLarge)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		if err := m.PNG(io.Discard, 10, 1); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func BenchmarkSVGSmall(b *testing.B) {
 	m := benchMatrix(b, benchSmall)
 	b.ReportAllocs()
