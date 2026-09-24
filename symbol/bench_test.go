@@ -1,6 +1,7 @@
 package symbol
 
 import (
+	"image/png"
 	"io"
 	"strings"
 	"testing"
@@ -95,5 +96,15 @@ func BenchmarkSVGLarge(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		_ = m.SVG(10, 1)
+	}
+}
+
+func BenchmarkPalettedPNGSmall(b *testing.B) {
+	m := benchMatrix(b, benchSmall)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		if err := png.Encode(io.Discard, m.Paletted(10, 1)); err != nil {
+			b.Fatal(err)
+		}
 	}
 }

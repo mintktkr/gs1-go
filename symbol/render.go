@@ -2,6 +2,7 @@ package symbol
 
 import (
 	"image"
+	"image/color"
 	"image/png"
 	"io"
 	"strconv"
@@ -16,8 +17,30 @@ import (
 func (m *Matrix) Image(scale, quiet int) *image.Gray {
 	scale, quiet = renderParams(scale, quiet)
 	img := image.NewGray(image.Rect(0, 0, (m.Cols+2*quiet)*scale, (m.Rows+2*quiet)*scale))
-	for i := range img.Pix {
-		img.Pix[i] = 0xFF
+	m.draw(img.Pix, img.Stride, scale, quiet, 0xFF, 0)
+	return img
+}
+
+// Paletted renders the same picture as Image as a two-color paletted image:
+// index 0 is black (dark modules), index 1 is white (light modules and quiet
+// zone). The image/png encoder writes a two-color palette with bit depth 1,
+// so png.Encode(w, m.Paletted(scale, quiet)) produces files about half the
+// size of PNG, at some CPU cost on very large images.
+func (m *Matrix) Paletted(scale, quiet int) *image.Paletted {
+	scale, quiet = renderParams(scale, quiet)
+	img := image.NewPaletted(image.Rect(0, 0, (m.Cols+2*quiet)*scale, (m.Rows+2*quiet)*scale), blackWhite)
+	m.draw(img.Pix, img.Stride, scale, quiet, 1, 0)
+	return img
+}
+
+// blackWhite is the palette of Paletted.
+var blackWhite = color.Palette{color.Gray{Y: 0}, color.Gray{Y: 0xFF}}
+
+// draw fills the pixmap pix, whose rows are stride bytes apart, with light
+// and paints every dark module as a scale x scale square of dark.
+func (m *Matrix) draw(pix []byte, stride, scale, quiet int, light, dark byte) {
+	for i := range pix {
+		pix[i] = light
 	}
 	for row := 0; row < m.Rows; row++ {
 		top := (row + quiet) * scale
@@ -27,11 +50,13 @@ func (m *Matrix) Image(scale, quiet int) *image.Gray {
 			}
 			left := (col + quiet) * scale
 			for y := top; y < top+scale; y++ {
-				clear(img.Pix[y*img.Stride+left : y*img.Stride+left+scale])
+				line := pix[y*stride+left : y*stride+left+scale]
+				for i := range line {
+					line[i] = dark
+				}
 			}
 		}
 	}
-	return img
 }
 
 // PNG writes the matrix as a PNG image; see Image for the parameters.
