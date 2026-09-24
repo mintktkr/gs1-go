@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -151,6 +152,116 @@ func TestDMPlaceCoverage(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestDMPlaceTableAllSizes checks the placement table of all 30 sizes against
+// the Annex F walk it is built from: every mapping module decodes to the value
+// the walk gave it, every codeword bit is placed exactly once, and every
+// module outside the mapping matrix follows the finder pattern.
+func TestDMPlaceTableAllSizes(t *testing.T) {
+	for i, s := range dmSizes {
+		t.Run(sizeName(s), func(t *testing.T) {
+			tab := dmPlaceTable(s)
+			if len(tab) != s.Rows*s.Cols {
+				t.Fatalf("vers %d: table has %d entries, want %d", i+1, len(tab), s.Rows*s.Cols)
+			}
+			cw := testCW(s.DataCW + s.ECCCW)
+			m := dmMappingOf(cw, s)
+			mrows, mcols := s.mappingSize()
+
+			seen := make([]bool, len(cw)*8)
+			for mr := 0; mr < mrows; mr++ {
+				for mc := 0; mc < mcols; mc++ {
+					r := mr/s.RegionRows*(s.RegionRows+2) + 1 + mr%s.RegionRows
+					c := mc/s.RegionCols*(s.RegionCols+2) + 1 + mc%s.RegionCols
+					e := tab[r*s.Cols+c]
+					var got int
+					switch e {
+					case dmPlaceDark:
+						got = 1
+					case dmPlaceLight:
+						got = 0
+					default:
+						got = int(cw[e>>3] >> (7 - (e & 7)) & 1)
+						if seen[e] {
+							t.Errorf("vers %d: codeword %d bit %d placed twice", i+1, e>>3, e&7)
+						}
+						seen[e] = true
+					}
+					if got != int(m.get(mr, mc)) {
+						t.Errorf("vers %d: mapping module (%d,%d) is %d, the table says %d",
+							i+1, mr, mc, m.get(mr, mc), got)
+					}
+				}
+			}
+			for e, used := range seen {
+				if !used {
+					t.Errorf("vers %d: codeword %d bit %d was never placed", i+1, e>>3, e&7)
+				}
+			}
+
+			for r := 0; r < s.Rows; r++ {
+				for c := 0; c < s.Cols; c++ {
+					if dataModule(s, r, c) {
+						continue
+					}
+					rr, cc := r%(s.RegionRows+2), c%(s.RegionCols+2)
+					want := finderModule(rr, cc, s.RegionRows+2, s.RegionCols+2)
+					if got := tab[r*s.Cols+c] == dmPlaceDark; got != want {
+						t.Errorf("vers %d: module (%d,%d) = %v, want finder %v", i+1, r, c, got, want)
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestDMPlaceTableConcurrent checks concurrent first use of the tables: after
+// clearing the cache, several encoders build and read all of them at once, and
+// must still see the same modules as a single-threaded run does.
+func TestDMPlaceTableConcurrent(t *testing.T) {
+	want := make([]*Matrix, len(dmSizes))
+	for i, s := range dmSizes {
+		want[i] = dmPlace(testCW(s.DataCW+s.ECCCW), s)
+	}
+	dmPlaceTablesMu.Lock()
+	dmPlaceTables = map[dmSize][]uint16{}
+	dmPlaceTablesMu.Unlock()
+
+	var wg sync.WaitGroup
+	for g := 0; g < 4; g++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i, s := range dmSizes {
+				got := dmPlace(testCW(s.DataCW+s.ECCCW), s)
+				for r := 0; r < s.Rows; r++ {
+					for c := 0; c < s.Cols; c++ {
+						if got.Dark(r, c) != want[i].Dark(r, c) {
+							t.Errorf("vers %d: module (%d,%d) = %v, want %v", i+1, r, c, got.Dark(r, c), want[i].Dark(r, c))
+							return
+						}
+					}
+				}
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+// BenchmarkPlaceTableBuild measures the first-use cost of a placement table,
+// paid once per size: the largest symbol, 144x144.
+func BenchmarkPlaceTableBuild(b *testing.B) {
+	s := dmSizes[0]
+	for _, c := range dmSizes {
+		if c.Rows*c.Cols > s.Rows*s.Cols {
+			s = c
+		}
+	}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		buildDMPlaceTable(s)
 	}
 }
 
