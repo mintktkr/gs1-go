@@ -62,8 +62,8 @@ func TestDMECCSyndromes(t *testing.T) {
 				for i := b; i < s.DataCW; i += s.Blocks {
 					block = append(block, got[i])
 				}
-				for i := s.DataCW + b; i < s.DataCW+s.ECCCW; i += s.Blocks {
-					block = append(block, got[i])
+				for j := 0; j < n; j++ {
+					block = append(block, got[dmECCPos(s, b, j)])
 				}
 				for r, syn := range dmSyndromes(block, n) {
 					if syn != 0 {
@@ -123,4 +123,23 @@ func dmTestCodewords(n int) []byte {
 		b[i] = byte(x >> 16)
 	}
 	return b
+}
+
+// TestDMECCPos pins the 144x144 layout: the ECC of the two shorter blocks
+// (8 and 9) comes first, as zint and zxing expect.
+func TestDMECCPos(t *testing.T) {
+	s := dmTestSize(t, 144, 144)
+	tests := []struct{ b, j, want int }{
+		{8, 0, 1558}, {9, 0, 1559}, {0, 0, 1560}, {7, 0, 1567},
+		{8, 1, 1568}, {7, 61, 2177},
+	}
+	for _, tt := range tests {
+		if got := dmECCPos(s, tt.b, tt.j); got != tt.want {
+			t.Errorf("dmECCPos(144x144, b=%d, j=%d) = %d, want %d", tt.b, tt.j, got, tt.want)
+		}
+	}
+	even := dmTestSize(t, 52, 52)
+	if got := dmECCPos(even, 1, 3); got != 204+3*2+1 {
+		t.Errorf("dmECCPos(52x52, b=1, j=3) = %d, want %d", got, 204+3*2+1)
+	}
 }
