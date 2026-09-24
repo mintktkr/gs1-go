@@ -262,6 +262,25 @@ make wasm   # produces wasm/gs1.wasm and a servable example under wasm/example/
 TypeScript declarations live in [`wasm/gs1.d.ts`](wasm/gs1.d.ts). Design
 notes are in [ADR 0005](docs/adr/0005-webassembly-target.md).
 
+## Symbol generation (prototype)
+
+The `symbol` package renders GS1 DataMatrix symbols with no dependencies.
+It is a prototype for [#24](https://github.com/galenzo17/gs1-go/issues/24)
+and does not change the scope below until an ADR decides it.
+
+```go
+m, err := symbol.GS1DataMatrix("(01)04150000021126(17)250630(10)ABC123", symbol.DataMatrixOptions{})
+svg := m.SVG(10, 1) // or m.PNG(w, 10, 1), m.Image, m.Paletted
+```
+
+```bash
+gs1 datamatrix -o dm.png "(01)04150000021126(17)250630(10)ABC123"
+```
+
+See [docs/datamatrix.md](docs/datamatrix.md) for sizes, outputs,
+verification and limits, and [docs/performance.md](docs/performance.md) for
+profiling results and the opt-in `Encoder`.
+
 ## Scope
 
 This library is a parsing and validation layer. It does not generate

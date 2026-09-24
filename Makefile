@@ -2,7 +2,7 @@ GO      ?= go
 PKG     := ./...
 FUZZTIME ?= 30s
 
-.PHONY: all test race cover lint vet fuzz bench wasm build clean
+.PHONY: all test race cover lint vet fuzz bench verify-symbol wasm build clean
 
 all: vet lint test
 
@@ -26,7 +26,10 @@ fuzz:
 	$(GO) test -run=^$$ -fuzz=FuzzParse -fuzztime=$(FUZZTIME) .
 
 bench:
-	$(GO) test -run=^$$ -bench=. -benchmem .
+	$(GO) test -run=^$$ -bench=. -benchmem . ./symbol/
+
+verify-symbol:
+	bash symbol/testdata/verify-decode.sh
 
 build:
 	$(GO) build -o gs1 ./cmd/gs1
