@@ -45,6 +45,33 @@
   td.v { font-family: ui-monospace, monospace; word-break: break-all; }
   .foot { color:var(--muted); font-size:12px; margin-top:6px; }
   .loading { color: var(--muted); }
+  .demo { margin-top: 16px; padding-top: 14px; border-top: 1px dashed var(--line); }
+  .play { font: 600 14px ui-sans-serif, system-ui; color: #fff; border: 0; border-radius: 99px;
+    padding: 8px 18px; cursor: pointer; background: linear-gradient(90deg, var(--accent), var(--pink));
+    box-shadow: 0 2px 10px #b596e855; transition: transform .1s; }
+  .play:active { transform: scale(.96); }
+  .play.running { background: linear-gradient(90deg, #8e7bb8, #c98aa8); }
+  .speeds { display: inline-flex; border: 1px solid var(--line); border-radius: 99px; overflow: hidden; }
+  .speeds button { font: 13px ui-sans-serif, system-ui; border: 0; background: #fff; color: var(--muted);
+    padding: 5px 12px; cursor: pointer; }
+  .speeds button.on { background: #f1e8fd; color: #7a4fc4; font-weight: 600; }
+  .counters { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+  .counters b { color: var(--ink); }
+  /* In demo mode half-typed input is expected: keep the last symbol crisp. */
+  body.demo-on .sym.stale svg { opacity: 1; filter: none; }
+  body.demo-on .sym.stale .err { display: none; }
+  body.demo-on .out.stale .stats, body.demo-on .out.stale table, body.demo-on .out.stale .foot { opacity: 1; }
+  .sym.done { animation: glow .45s ease-out; }
+  @keyframes glow { from { box-shadow: 0 0 0 6px #b596e866; } to { box-shadow: 0 0 0 0 #b596e800; } }
+  .gallery-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px; }
+  .gallery-head span { color: var(--muted); font-size: 12px; }
+  .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 10px; }
+  .tile { border: 1px solid var(--line); border-radius: 10px; padding: 8px 8px 6px; background: #fff;
+    cursor: pointer; animation: pop .35s cubic-bezier(.2, 1.4, .4, 1); }
+  .tile:hover { border-color: var(--accent); }
+  .tile svg { display: block; width: 100%; height: auto; image-rendering: pixelated; }
+  .tile span { display: block; font: 10px ui-monospace, monospace; color: var(--muted); text-align: center; margin-top: 4px; }
+  @keyframes pop { from { transform: scale(.4) translateY(-12px); opacity: 0; } to { transform: none; opacity: 1; } }
   @media (max-width: 700px) { .out { grid-template-columns: 1fr; } }
 </style>
 </head>
@@ -69,6 +96,15 @@
       <label><input type="checkbox" id="rect"> rectangular</label>
       <label><input type="checkbox" id="cache" checked> reuse <code>Encoder</code> <small style="color:var(--muted)">(layout cache)</small></label>
     </div>
+    <div class="row demo">
+      <button id="play" class="play">▶ demo mode</button>
+      <div class="speeds" id="speeds">
+        <button data-speed="calm">calm</button>
+        <button data-speed="fast" class="on">fast</button>
+        <button data-speed="turbo">turbo</button>
+      </div>
+      <span class="counters" id="counters"></span>
+    </div>
   </section>
 
   <section class="card out" id="out">
@@ -84,6 +120,11 @@
       <p class="foot" id="foot"></p>
     </div>
   </section>
+
+  <section class="card gallery-card" id="gallery-card" hidden>
+    <div class="gallery-head"><b>generated</b><span id="gallery-note"></span></div>
+    <div class="gallery" id="gallery"></div>
+  </section>
 </main>
 
 <script src="wasm_exec.js"></script>
@@ -97,7 +138,7 @@ function fmtNs(ns) {
   return (ns / 1e6).toFixed(2) + " ms";
 }
 
-function render() {
+function render(bench = true) {
   const opts = { gs1: gs1.checked, rect: rect.checked, cache: cache.checked };
   // One encode plus drawing it: what a keystroke actually costs.
   const t0 = performance.now();
@@ -115,7 +156,7 @@ function render() {
     $("out").classList.add("stale");
     err.textContent = r.error;
     sym.append(err);
-    return;
+    return r;
   }
   sym.classList.remove("stale");
   $("out").classList.remove("stale");
@@ -123,6 +164,7 @@ function render() {
   $("size").textContent = r.rows + " × " + r.cols;
   renderElements(r.elements);
   history.replaceState(null, "", "#" + encodeURIComponent(input.value));
+  if (!bench) return r;
 
   // Then measure encoding alone, averaged: browser timers are too coarse
   // for a single encode of a few microseconds.
@@ -131,6 +173,7 @@ function render() {
   $("rate").textContent = Math.round(1e9 / b.perOpNs).toLocaleString();
   $("foot").textContent = "encode time averaged over " + b.iters.toLocaleString() +
     " re-encodes (~3 ms), since browser timers are too coarse to time one encode.";
+  return r;
 }
 
 function renderElements(els) {
@@ -161,7 +204,179 @@ document.querySelectorAll(".presets button").forEach((b) => b.addEventListener("
   render();
   input.focus();
 }));
-for (const el of [input, gs1, rect, cache]) el.addEventListener("input", render);
+for (const el of [input, gs1, rect, cache]) el.addEventListener("input", (e) => {
+  if (e.isTrusted && el === input) stopDemo(); // you typed: demo hands over
+  render();
+});
+
+// ---- demo mode ----------------------------------------------------------
+// Invents realistic GS1 labels, types them in character by character (every
+// character re-encodes the live symbol) and collects the results.
+
+const rnd = (n) => Math.floor(Math.random() * n);
+const pick = (a) => a[rnd(a.length)];
+const digits = (n) => Array.from({ length: n }, () => rnd(10)).join("");
+const alnum = (n) => Array.from({ length: n }, () => pick("ABCDEFGHJKLMNPQRSTUVWXYZ0123456789")).join("");
+
+// GS1 mod-10 check digit: weights 3,1,3,... from the right.
+function withCheck(body) {
+  let sum = 0;
+  for (let i = 0; i < body.length; i++) sum += (+body[body.length - 1 - i]) * (i % 2 === 0 ? 3 : 1);
+  return body + ((10 - (sum % 10)) % 10);
+}
+function yymmdd() {
+  const d = new Date(Date.now() + rnd(4 * 365) * 864e5);
+  return String(d.getFullYear() % 100).padStart(2, "0") + String(d.getMonth() + 1).padStart(2, "0") +
+    String(d.getDate()).padStart(2, "0");
+}
+const gtin = () => withCheck(pick(["0", "1"]) + pick(["780", "779", "789", "750", "841", "400"]) + digits(9));
+
+// A mix of what shows up on real packs, from tiny to 144x144.
+function randomLabel() {
+  const r = Math.random();
+  if (r < 0.1) return { v: "(00)" + withCheck(pick(["0", "3"]) + "780" + digits(13)) };
+  if (r < 0.2) return { v: "(01)" + gtin(), rect: true };
+  if (r < 0.28) {
+    let v = "(01)" + gtin();
+    for (let i = 0, n = 2 + rnd(9); i < n; i++) v += "(" + (91 + rnd(9)) + ")" + alnum(30 + rnd(61));
+    return { v };
+  }
+  let v = "(01)" + gtin() + "(17)" + yymmdd() + "(10)" + alnum(3 + rnd(10));
+  if (Math.random() < 0.8) v += "(21)" + alnum(4 + rnd(17));
+  if (Math.random() < 0.25) v += "(11)" + yymmdd();
+  if (Math.random() < 0.2) v += "(30)" + (1 + rnd(500));
+  return { v, rect: Math.random() < 0.15 && v.length < 60 };
+}
+
+const SPEEDS = { calm: { chars: 1, pause: 700 }, fast: { chars: 3, pause: 250 }, turbo: { chars: Infinity, pause: 0 } };
+let speed = "fast", running = false, job = null, frame = 0;
+const stats = { symbols: 0, encodes: 0, started: 0 };
+
+function startDemo() {
+  running = true;
+  document.body.classList.add("demo-on");
+  stats.symbols = 0; stats.encodes = 0; stats.started = performance.now();
+  gs1.checked = true;
+  $("play").textContent = "■ stop";
+  $("play").classList.add("running");
+  $("gallery-card").hidden = false;
+  job = null;
+  frame = requestAnimationFrame(tick);
+}
+function stopDemo() {
+  if (!running) return;
+  running = false;
+  document.body.classList.remove("demo-on");
+  cancelAnimationFrame(frame);
+  $("play").textContent = "▶ demo mode";
+  $("play").classList.remove("running");
+  rect.checked = false;
+}
+
+function newJob() {
+  const label = randomLabel();
+  job = { target: label.v, typed: 0, done: false, waitUntil: 0 };
+  rect.checked = !!label.rect;
+}
+
+function tick(now) {
+  if (!running) return;
+  frame = requestAnimationFrame(tick);
+  if (job?.done) {
+    if (now < job.waitUntil) return; // let the finished symbol sit a moment
+    job = null;
+  }
+  if (!job) newJob();
+
+  if (speed === "turbo") {
+    // Whole labels, as many as fit in ~12 ms of this frame; show the last.
+    // Only the frame's last few reach the gallery: drawing every tile would
+    // measure the DOM, not the encoder.
+    const until = performance.now() + 12;
+    const recent = [];
+    while (performance.now() < until) {
+      const r = finishLabel(job.target, false);
+      if (!r.error) recent.push([job.target, r, rect.checked]);
+      if (recent.length > 4) recent.shift();
+      newJob();
+    }
+    for (const [v, r, isRect] of recent) addTile(v, r, isRect);
+    showLast();
+  } else {
+    const sp = SPEEDS[speed];
+    job.typed = Math.min(job.target.length, job.typed + sp.chars);
+    input.value = job.target.slice(0, job.typed);
+    if (job.typed < job.target.length) {
+      render(false);
+      stats.encodes++;
+    } else {
+      finishLabel(job.target, true);
+      job.done = true;
+      job.waitUntil = now + sp.pause;
+    }
+  }
+  updateCounters();
+}
+
+// Records a finished label: benchmarks it on screen (slow modes) or just
+// encodes it (turbo), and adds it to the gallery.
+let lastTurbo = null;
+function finishLabel(value, onScreen) {
+  const opts = { gs1: true, rect: rect.checked, cache: cache.checked };
+  let r;
+  if (onScreen) {
+    r = render(true);
+    $("sym").classList.remove("done"); void $("sym").offsetWidth; $("sym").classList.add("done");
+  } else {
+    r = gs1dm(value, opts);
+    lastTurbo = { value, r };
+  }
+  stats.encodes++;
+  if (r.error) return r;
+  stats.symbols++;
+  if (onScreen) addTile(value, r, rect.checked);
+  return r;
+}
+
+function showLast() {
+  if (!lastTurbo || lastTurbo.r.error) return;
+  input.value = lastTurbo.value;
+  render(false);
+}
+
+const MAX_TILES = 48;
+function addTile(value, r, isRect) {
+  const g = $("gallery");
+  const t = document.createElement("div");
+  t.className = "tile";
+  t.title = value;
+  t.innerHTML = r.svg; // generated by the encoder: numbers only
+  const cap = document.createElement("span");
+  cap.textContent = r.rows + "×" + r.cols;
+  t.append(cap);
+  t.addEventListener("click", () => { stopDemo(); rect.checked = isRect; input.value = value; render(); });
+  g.prepend(t);
+  while (g.children.length > MAX_TILES) g.lastChild.remove();
+  $("gallery-note").textContent = "newest first · last " + g.children.length + " · click one to load it";
+}
+
+function updateCounters() {
+  const secs = (performance.now() - stats.started) / 1000;
+  $("counters").innerHTML = "";
+  const c = $("counters");
+  for (const [k, v] of [["symbols", stats.symbols.toLocaleString()], ["encodes incl. keystrokes", stats.encodes.toLocaleString()],
+      ["symbols/s", secs > 0.5 ? (stats.symbols / secs).toFixed(0) : "–"]]) {
+    const b = document.createElement("b");
+    b.textContent = v;
+    c.append(b, " " + k + "   ");
+  }
+}
+
+$("play").addEventListener("click", () => (running ? stopDemo() : startDemo()));
+document.querySelectorAll("#speeds button").forEach((b) => b.addEventListener("click", () => {
+  speed = b.dataset.speed;
+  document.querySelectorAll("#speeds button").forEach((x) => x.classList.toggle("on", x === b));
+}));
 
 // The input lives in the URL hash, so a symbol can be shared as a link.
 if (location.hash.length > 1) input.value = decodeURIComponent(location.hash.slice(1));
