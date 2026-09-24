@@ -75,6 +75,45 @@ func TestDMECCSyndromes(t *testing.T) {
 	}
 }
 
+// TestDMGenLog checks every cached generator: it must have degree n, no zero
+// coefficients (log form cannot store a zero), and the roots alpha^1..alpha^n,
+// which fixes g(x) = (x-a^1)...(x-a^n).
+func TestDMGenLog(t *testing.T) {
+	seen := make(map[int]bool)
+	for _, s := range dmSizes {
+		n := s.ECCCW / s.Blocks
+		if n > dmMaxECC {
+			t.Fatalf("%dx%d needs %d ECC codewords per block, more than dmMaxECC", s.Rows, s.Cols, n)
+		}
+		if seen[n] {
+			continue
+		}
+		seen[n] = true
+		glog := dmGenLog[n]
+		if len(glog) != n {
+			t.Fatalf("dmGenLog[%d] holds %d coefficients, want %d", n, len(glog), n)
+		}
+		for i, c := range dmGenerator(n)[1:] {
+			if c == 0 {
+				t.Fatalf("generator of degree %d has a zero coefficient", n)
+			}
+			if got := dmGFExp[glog[i]]; got != c {
+				t.Errorf("dmGenLog[%d][%d] = log(%d), want log(%d)", n, i, got, c)
+			}
+		}
+		for r := 1; r <= n; r++ {
+			x := dmGFExp[r]
+			acc := byte(1)
+			for _, logC := range glog {
+				acc = dmMul(acc, x) ^ dmGFExp[logC]
+			}
+			if acc != 0 {
+				t.Errorf("generator of degree %d at alpha^%d = %d, want 0", n, r, acc)
+			}
+		}
+	}
+}
+
 // TestDMECCKeepsInput checks that dmECC does not write to data.
 func TestDMECCKeepsInput(t *testing.T) {
 	for _, s := range dmSizes {
