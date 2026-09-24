@@ -274,3 +274,44 @@ func TestRenderPNGConcurrent(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+// TestRenderPaletted checks that Paletted draws the same picture as Image and
+// that it encodes as a 1-bit PNG that decodes to the same pixels.
+func TestRenderPaletted(t *testing.T) {
+	m, err := GS1DataMatrix(benchSmall, DataMatrixOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gray := m.Image(3, 2)
+	pal := m.Paletted(3, 2)
+	if pal.Bounds() != gray.Bounds() {
+		t.Fatalf("bounds %v, want %v", pal.Bounds(), gray.Bounds())
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, pal); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := png.DecodeConfig(bytes.NewReader(buf.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := cfg.ColorModel.(color.Palette); !ok {
+		t.Errorf("PNG color model %T, want a palette", cfg.ColorModel)
+	}
+	dec, err := png.Decode(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := gray.Bounds()
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			want := gray.GrayAt(x, y).Y
+			if got := color.GrayModel.Convert(pal.At(x, y)).(color.Gray).Y; got != want {
+				t.Fatalf("Paletted pixel (%d,%d) = %d, want %d", x, y, got, want)
+			}
+			if got := color.GrayModel.Convert(dec.At(x, y)).(color.Gray).Y; got != want {
+				t.Fatalf("decoded pixel (%d,%d) = %d, want %d", x, y, got, want)
+			}
+		}
+	}
+}
