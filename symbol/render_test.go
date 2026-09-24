@@ -2,6 +2,8 @@ package symbol
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"image"
 	"image/color"
 	"image/png"
@@ -146,6 +148,37 @@ func TestRenderPNG(t *testing.T) {
 				t.Errorf("pixel (%d, %d) = %d, want %d", x, y, got, wantY)
 			}
 		}
+	}
+}
+
+// TestRenderSVGLarge checks the SVG of a real 144x144 symbol against hashes
+// recorded from the pre-optimization writer: the output of a full-size symbol
+// must stay byte for byte the same, multi-digit coordinates included.
+func TestRenderSVGLarge(t *testing.T) {
+	m, err := GS1DataMatrix(benchLarge, DataMatrixOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Rows != 144 || m.Cols != 144 {
+		t.Fatalf("symbol is %dx%d, want 144x144", m.Rows, m.Cols)
+	}
+	tests := []struct {
+		scale, quiet int
+		want         string
+	}{
+		{10, 1, "acc1ed9b37e23465a9d16f21a120831dce2e5f5ece3b258bb028a25b53161101"},
+		{1, 0, "7e9fa4b788b6a1e32b1f5a3d600110be4e78ecaba8b222a656d24abbd18c44f1"},
+	}
+	for _, tt := range tests {
+		sum := sha256.Sum256([]byte(m.SVG(tt.scale, tt.quiet)))
+		if got := hex.EncodeToString(sum[:]); got != tt.want {
+			t.Errorf("SVG(%d, %d) sha256 = %s, want %s", tt.scale, tt.quiet, got, tt.want)
+		}
+	}
+	// One allocation for the document buffer and one for the string: no
+	// intermediate string per number, and the buffer never grows.
+	if allocs := testing.AllocsPerRun(3, func() { _ = m.SVG(10, 1) }); allocs > 2 {
+		t.Errorf("SVG(10, 1) allocates %.0f times per run, want at most 2", allocs)
 	}
 }
 
