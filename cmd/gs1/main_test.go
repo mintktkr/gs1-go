@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 )
@@ -132,5 +133,49 @@ func TestUsageAndVersion(t *testing.T) {
 	}
 	if code, out, _ := exec(t, "", "version"); code != 0 || !strings.HasPrefix(out, "gs1 ") {
 		t.Errorf("version: exit %d out %q", code, out)
+	}
+}
+
+func TestDataMatrixSVG(t *testing.T) {
+	code, out, errOut := exec(t, "", "datamatrix", "(01)04150000021126(17)250630(10)ABC123")
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	if !strings.HasPrefix(out, "<svg ") || !strings.Contains(out, "</svg>") {
+		t.Errorf("not an SVG document:\n%s", out)
+	}
+}
+
+func TestDataMatrixPNG(t *testing.T) {
+	path := t.TempDir() + "/dm.png"
+	code, _, errOut := exec(t, "", "datamatrix", "-o", path, "-scale", "4", "0104150000021126")
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasPrefix(b, []byte("\x89PNG")) {
+		t.Errorf("not a PNG file")
+	}
+}
+
+func TestDataMatrixErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		code int
+	}{
+		{"no barcode", []string{"datamatrix"}, 2},
+		{"bad flag", []string{"datamatrix", "-nope", "01"}, 2},
+		{"invalid element string", []string{"datamatrix", "(01)123"}, 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if code, _, _ := exec(t, "", tt.args...); code != tt.code {
+				t.Errorf("exit %d, want %d", code, tt.code)
+			}
+		})
 	}
 }
