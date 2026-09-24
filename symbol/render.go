@@ -5,7 +5,6 @@ import (
 	"image/png"
 	"io"
 	"strconv"
-	"strings"
 )
 
 // Image renders the matrix as a grayscale image, scale pixels per module with
@@ -49,28 +48,75 @@ func (m *Matrix) SVG(scale, quiet int) string {
 	width := (m.Cols + 2*quiet) * scale
 	height := (m.Rows + 2*quiet) * scale
 
-	var b strings.Builder
-	b.WriteString(`<svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="`)
-	b.WriteString(strconv.Itoa(width))
-	b.WriteString(`" height="`)
-	b.WriteString(strconv.Itoa(height))
-	b.WriteString(`" viewBox="0 0 `)
-	b.WriteString(strconv.Itoa(width))
-	b.WriteByte(' ')
-	b.WriteString(strconv.Itoa(height))
-	b.WriteString(`" shape-rendering="crispEdges">`)
-	b.WriteByte('\n')
-	b.WriteString(`<rect width="100%" height="100%" fill="#fff"/>`)
-	b.WriteByte('\n')
-	b.WriteString(`<path fill="#000" d="`)
-	m.writePath(&b, scale, quiet)
-	b.WriteString("\"/>\n</svg>\n")
-	return b.String()
+	// One buffer for the whole document, sized up front so that it never
+	// grows, then converted to a string in a single copy.
+	b := make([]byte, 0, svgFixedCap+m.pathCap(width, height, scale))
+	b = append(b, `<svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="`...)
+	b = strconv.AppendInt(b, int64(width), 10)
+	b = append(b, `" height="`...)
+	b = strconv.AppendInt(b, int64(height), 10)
+	b = append(b, `" viewBox="0 0 `...)
+	b = strconv.AppendInt(b, int64(width), 10)
+	b = append(b, ' ')
+	b = strconv.AppendInt(b, int64(height), 10)
+	b = append(b, `" shape-rendering="crispEdges">`...)
+	b = append(b, '\n')
+	b = append(b, `<rect width="100%" height="100%" fill="#fff"/>`...)
+	b = append(b, '\n')
+	b = append(b, `<path fill="#000" d="`...)
+	b = m.appendPath(b, scale, quiet)
+	b = append(b, "\"/>\n</svg>\n"...)
+	return string(b)
 }
 
-// writePath appends the path data of the dark modules: one subpath per
+// svgFixedCap is an upper bound on the bytes of the document that are not
+// path data: the fixed text and the four numbers of the header. Reserving a
+// few bytes too many costs nothing; a too small number only makes the buffer
+// grow once more.
+const svgFixedCap = 256
+
+// pathCap returns an upper bound on the length of the path data of a symbol
+// rendered at the given pixel width, height and scale: one subpath per dark
+// run, whose numbers are all at most as wide as the symbol.
+func (m *Matrix) pathCap(width, height, scale int) int {
+	const syntax = 8 // 'M', ' ', 'h', 'v', "h-", 'z'
+	return m.darkRuns() * (syntax + 3*intDigits(width) + intDigits(height) + intDigits(scale))
+}
+
+// darkRuns returns the number of horizontal dark runs, which is the number of
+// subpaths appendPath emits.
+func (m *Matrix) darkRuns() int {
+	runs := 0
+	for row := 0; row < m.Rows; row++ {
+		base := row * m.Cols
+		for col := 0; col < m.Cols; {
+			if !m.mods[base+col] {
+				col++
+				continue
+			}
+			runs++
+			for col < m.Cols && m.mods[base+col] {
+				col++
+			}
+		}
+	}
+	return runs
+}
+
+// intDigits returns the number of decimal digits of n, which must not be
+// negative.
+func intDigits(n int) int {
+	digits := 1
+	for n >= 10 {
+		n /= 10
+		digits++
+	}
+	return digits
+}
+
+// appendPath appends the path data of the dark modules: one subpath per
 // horizontal run, in pixel units.
-func (m *Matrix) writePath(b *strings.Builder, scale, quiet int) {
+func (m *Matrix) appendPath(b []byte, scale, quiet int) []byte {
 	for row := 0; row < m.Rows; row++ {
 		y := (row + quiet) * scale
 		for col := 0; col < m.Cols; col++ {
@@ -84,20 +130,21 @@ func (m *Matrix) writePath(b *strings.Builder, scale, quiet int) {
 			}
 			x := (col + quiet) * scale
 			runWidth := run * scale
-			b.WriteByte('M')
-			b.WriteString(strconv.Itoa(x))
-			b.WriteByte(' ')
-			b.WriteString(strconv.Itoa(y))
-			b.WriteByte('h')
-			b.WriteString(strconv.Itoa(runWidth))
-			b.WriteByte('v')
-			b.WriteString(strconv.Itoa(scale))
-			b.WriteString("h-")
-			b.WriteString(strconv.Itoa(runWidth))
-			b.WriteByte('z')
+			b = append(b, 'M')
+			b = strconv.AppendInt(b, int64(x), 10)
+			b = append(b, ' ')
+			b = strconv.AppendInt(b, int64(y), 10)
+			b = append(b, 'h')
+			b = strconv.AppendInt(b, int64(runWidth), 10)
+			b = append(b, 'v')
+			b = strconv.AppendInt(b, int64(scale), 10)
+			b = append(b, 'h', '-')
+			b = strconv.AppendInt(b, int64(runWidth), 10)
+			b = append(b, 'z')
 			col += run - 1
 		}
 	}
+	return b
 }
 
 // renderParams clamps scale and quiet to the values Image, PNG and SVG accept.
