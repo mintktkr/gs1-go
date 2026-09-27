@@ -17,6 +17,13 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - Add dependency-free element string encoding and HRI formatting.
 - Element encoding validates 01/02 GTIN check digits; SSCC and GLN check
   digit validation remains deferred.
+- `symbol` package: GS1 DataMatrix (ECC 200) in all 24 square and 6
+  rectangular sizes, built on `Encode`. `GS1DataMatrix` and `DataMatrix`
+  return a `Matrix` rendered with `Image`, `PNG` or `SVG`.
+- `gs1 datamatrix` command writing SVG or PNG.
+- zint golden data for every symbol size, a decode round-trip test with
+  fuzz targets, and `make verify-symbol`, which decodes rendered symbols
+  with zxing-cpp outside the module.
 
 ### Changed
 

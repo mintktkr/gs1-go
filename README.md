@@ -38,6 +38,9 @@ b.GSIN() // "12345678901234567"
   identifiers (`]C1`, `]d2`, `]Q3`, `]e0`, `]J1`) and bare EAN-13 / UPC-A / GTIN-14.
 - **Element string encoding** with canonical fixed-AI ordering, FNC1 placement,
   and human-readable interpretation through `Barcode.HRI()`.
+- **GS1 DataMatrix generation** in the `symbol` sub-package: ECC 200 in all
+  square and rectangular sizes, rendered as `image.Image`, PNG or SVG. See
+  [ADR 0008](docs/adr/0008-symbol-generation.md).
 - **Scanner resilience by default.** UTF-8 BOM, CR/LF, NUL bytes and
   duplicated FNC1 from keyboard-wedge and USB HID scanners are normalized
   before parsing. See [ADR 0003](docs/adr/0003-scanner-resilience.md).
@@ -166,6 +169,31 @@ The strict association rules currently cover: AI 01 excluding 02 and 37; AI
 03, or 8006; net weight requiring 01 or 02; gross weight requiring 00 or 01;
 one decimal variant per measure prefix; and AI 8017 excluding 8018.
 
+### Data Matrix
+
+`symbol.GS1DataMatrix` encodes elements with `Encode`, so its input is
+validated the same way, and returns a `Matrix` of modules without quiet
+zone. Render it with the module size and quiet zone the label needs; GS1
+DataMatrix requires a quiet zone of at least one module.
+
+```go
+b, err := gs1.Parse("(01)04150000021126(17)250630(10)ABC123")
+if err != nil {
+	return err
+}
+m, err := symbol.GS1DataMatrix(b.Elements, symbol.DataMatrixOptions{})
+if err != nil {
+	return err
+}
+svg := m.SVG(10, 1) // 10 pixels per module, 1 module quiet zone
+```
+
+`DataMatrixOptions{Rectangular: true}` picks the smallest rectangular size.
+Only ASCII encodation is implemented, which every GS1 element string can use;
+an optimizing encoder may choose a smaller symbol for long alphanumeric data.
+Symbols are checked against zint module for module in `go test`, decoded back
+by a round-trip test, and decoded by zxing-cpp with `make verify-symbol`.
+
 ### Dates
 
 GS1 dates are `YYMMDD` with years mapped to 2000–2099. A day of `00` denotes
@@ -272,6 +300,7 @@ gs1 parse -validate anvisa "$SCAN"                     # exit 1 if non-compliant
 cat scans.txt | gs1 parse -json                        # one JSON object per line
 gs1 gtin 04150000021126                                # check digit
 gs1 ai 3102                                            # AI (3102)  Net Weight kg  N6
+gs1 datamatrix -o dm.png "(01)04150000021126(10)ABC"  # GS1 DataMatrix, SVG without -o
 ```
 
 Exit codes: `0` success, `1` invalid input or failed validation, `2` usage error.
@@ -304,8 +333,9 @@ notes are in [ADR 0005](docs/adr/0005-webassembly-target.md).
 
 ## Scope
 
-This library is a parsing and validation layer. It does not generate
-barcodes, verify print quality, resolve GS1 Digital Link URIs, or implement
+This library is a parsing and validation layer that also renders GS1
+DataMatrix symbols ([ADR 0008](docs/adr/0008-symbol-generation.md)). It does
+not verify print quality, resolve GS1 Digital Link URIs, or implement
 business documents such as dispatch advices. See
 [ADR 0002](docs/adr/0002-parser-scope.md) for the reasoning and the GS1
 resources that cover those areas.
