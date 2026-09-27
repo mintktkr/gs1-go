@@ -209,6 +209,9 @@ func TestDataMatrixErrors(t *testing.T) {
 		{"no barcode", []string{"datamatrix"}, 2},
 		{"bad flag", []string{"datamatrix", "-nope", "01"}, 2},
 		{"invalid element string", []string{"datamatrix", "(01)123"}, 1},
+		// Parse accepts a wrong check digit; gs1.Encode refuses to print it.
+		{"wrong check digit", []string{"datamatrix", "(01)04150000021127"}, 1},
+		{"too long for rectangular", []string{"datamatrix", "-rect", "(01)04150000021126(91)" + strings.Repeat("A", 90)}, 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
