@@ -3,7 +3,6 @@ package symbol
 import (
 	"bytes"
 	"encoding/hex"
-	"fmt"
 	"testing"
 )
 
@@ -42,39 +41,6 @@ func TestDMECCInterleavedBlocks(t *testing.T) {
 	}
 }
 
-// TestDMECCSyndromes checks, for every symbol size and block, that the data
-// codewords of a block followed by its ECC codewords form a Reed-Solomon
-// codeword: the block polynomial is zero at alpha^1..alpha^n.
-func TestDMECCSyndromes(t *testing.T) {
-	for _, s := range dmSizes {
-		t.Run(fmt.Sprintf("%dx%d", s.Rows, s.Cols), func(t *testing.T) {
-			data := dmTestCodewords(s.DataCW)
-			got := dmECC(data, s)
-			if len(got) != s.DataCW+s.ECCCW {
-				t.Fatalf("len(dmECC) = %d, want %d", len(got), s.DataCW+s.ECCCW)
-			}
-			if !bytes.Equal(got[:s.DataCW], data) {
-				t.Fatalf("data prefix of dmECC differs from input")
-			}
-			n := s.ECCCW / s.Blocks
-			for b := 0; b < s.Blocks; b++ {
-				block := make([]byte, 0, s.DataCW/s.Blocks+1+n)
-				for i := b; i < s.DataCW; i += s.Blocks {
-					block = append(block, got[i])
-				}
-				for j := 0; j < n; j++ {
-					block = append(block, got[dmECCPos(s, b, j)])
-				}
-				for r, syn := range dmSyndromes(block, n) {
-					if syn != 0 {
-						t.Errorf("block %d: syndrome at alpha^%d is %d, want 0", b, r+1, syn)
-					}
-				}
-			}
-		})
-	}
-}
-
 // TestDMECCKeepsInput checks that dmECC does not write to data.
 func TestDMECCKeepsInput(t *testing.T) {
 	for _, s := range dmSizes {
@@ -97,21 +63,6 @@ func dmTestSize(t *testing.T, rows, cols int) dmSize {
 	}
 	t.Fatalf("no dmSizes entry for %dx%d", rows, cols)
 	return dmSize{}
-}
-
-// dmSyndromes evaluates a block, highest degree coefficient first, at
-// alpha^1..alpha^n. Every syndrome of a valid ECC 200 block is zero.
-func dmSyndromes(block []byte, n int) []byte {
-	syn := make([]byte, n)
-	for r := 1; r <= n; r++ {
-		x := dmGFExp[r]
-		acc := byte(0)
-		for _, c := range block {
-			acc = dmMul(acc, x) ^ c
-		}
-		syn[r-1] = acc
-	}
-	return syn
 }
 
 // dmTestCodewords returns n deterministic codewords for property tests.

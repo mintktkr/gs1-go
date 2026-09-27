@@ -54,7 +54,6 @@ type dmMapping struct {
 	rows, cols int
 	val        []int8 // -1 until placed, afterwards the module value
 	used       int    // codewords consumed, must end up as len(cw)
-	writes     int    // modules written, must end up as rows*cols
 }
 
 func newDMMapping(rows, cols int) *dmMapping {
@@ -71,7 +70,6 @@ func (m *dmMapping) placed(row, col int) bool { return m.val[row*m.cols+col] >= 
 
 func (m *dmMapping) set(row, col int, v int8) {
 	m.val[row*m.cols+col] = v
-	m.writes++
 }
 
 // next returns the next codeword and advances the codeword counter.

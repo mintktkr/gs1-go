@@ -3,6 +3,7 @@ package symbol
 // Matrix is a two-dimensional grid of modules. Row 0 is the top of the
 // symbol and column 0 the left edge. The quiet zone is not included.
 type Matrix struct {
+	// Rows and Cols are the symbol size in modules.
 	Rows, Cols int
 	mods       []bool
 }

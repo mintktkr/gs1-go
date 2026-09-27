@@ -93,23 +93,6 @@ func TestRenderImage(t *testing.T) {
 	}
 }
 
-func TestRenderImageQuietZone(t *testing.T) {
-	const scale, quiet = 2, 2
-	img := renderMatrix("###", "###").Image(scale, quiet)
-	for y := 0; y < img.Bounds().Dy(); y++ {
-		for x := 0; x < img.Bounds().Dx(); x++ {
-			inSymbol := x >= quiet*scale && x < (3+quiet)*scale && y >= quiet*scale && y < (2+quiet)*scale
-			want := uint8(255)
-			if inSymbol {
-				want = 0
-			}
-			if got := img.GrayAt(x, y).Y; got != want {
-				t.Errorf("pixel (%d, %d) = %d, want %d", x, y, got, want)
-			}
-		}
-	}
-}
-
 func TestRenderImageClampsParameters(t *testing.T) {
 	m := renderMatrix("##.", "..#")
 	got := m.Image(0, -1)

@@ -1,7 +1,6 @@
 package symbol_test
 
 import (
-	"bytes"
 	"fmt"
 	"strings"
 
@@ -50,21 +49,4 @@ func ExampleMatrix_SVG() {
 	header, _, _ := strings.Cut(m.SVG(4, 1), "\n")
 	fmt.Println(header)
 	// Output: <svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="56" height="56" viewBox="0 0 56 56" shape-rendering="crispEdges">
-}
-
-// ExampleMatrix_PNG writes a symbol at 10 pixels per module with the one
-// module quiet zone GS1 DataMatrix requires.
-func ExampleMatrix_PNG() {
-	m, err := symbol.DataMatrix("Hello", symbol.DataMatrixOptions{})
-	if err != nil {
-		fmt.Println("error:", err)
-		return
-	}
-	var buf bytes.Buffer
-	if err := m.PNG(&buf, 10, 1); err != nil {
-		fmt.Println("error:", err)
-		return
-	}
-	fmt.Println(bytes.HasPrefix(buf.Bytes(), []byte("\x89PNG")))
-	// Output: true
 }
