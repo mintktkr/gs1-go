@@ -1,7 +1,6 @@
 package symbol
 
 import (
-	"errors"
 	"fmt"
 )
 
@@ -13,15 +12,10 @@ const (
 )
 
 // dmEncodeASCII converts data to ASCII-encodation codewords. When gs1 is
-// true, FNC1 (232) is emitted first and every ASCII 29 maps to FNC1.
-func dmEncodeASCII(data string, gs1 bool) ([]byte, error) {
-	if data == "" {
-		return nil, errors.New("symbol: empty data")
-	}
-	cw := make([]byte, 0, len(data)+1)
-	if gs1 {
-		cw = append(cw, fnc1)
-	}
+// true, every ASCII 29 maps to FNC1, including the leading one that
+// gs1.Encode emits and that marks the symbol as GS1 DataMatrix.
+func dmEncodeASCII(data string, gs1 bool) []byte {
+	cw := make([]byte, 0, len(data))
 	for i := 0; i < len(data); i++ {
 		c := data[i]
 		switch {
@@ -31,15 +25,12 @@ func dmEncodeASCII(data string, gs1 bool) ([]byte, error) {
 			cw = append(cw, 130+10*(c-'0')+(data[i+1]-'0'))
 			i++
 		case c > 0x7F:
-			if gs1 {
-				return nil, fmt.Errorf("symbol: byte %#02x is not 7-bit ASCII", c)
-			}
 			cw = append(cw, upperShift, c-127)
 		default:
 			cw = append(cw, c+1)
 		}
 	}
-	return cw, nil
+	return cw
 }
 
 func isDigit(c byte) bool {

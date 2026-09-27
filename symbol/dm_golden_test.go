@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/galenzo17/gs1-go"
 )
 
 // goldenCase is one symbol from testdata/datamatrix-golden.txt, produced by
@@ -82,15 +84,14 @@ func TestDataMatrixGolden(t *testing.T) {
 			switch gc.kind {
 			case "plain":
 				s := dmSizes[gc.version-1]
-				cw, err := dmEncodeASCII(gc.data, false)
+				cw := dmEncodeASCII(gc.data, false)
+				m = dmPlace(dmECC(dmPad(cw, s.DataCW), s), s)
+			case "gs1":
+				b, err := gs1.Parse(strings.NewReplacer("[", "(", "]", ")").Replace(gc.data))
 				if err != nil {
 					t.Fatal(err)
 				}
-				m = dmPlace(dmECC(dmPad(cw, s.DataCW), s), s)
-			case "gs1":
-				in := strings.NewReplacer("[", "(", "]", ")").Replace(gc.data)
-				var err error
-				m, err = GS1DataMatrix(in, DataMatrixOptions{})
+				m, err = GS1DataMatrix(b.Elements, DataMatrixOptions{})
 				if err != nil {
 					t.Fatal(err)
 				}

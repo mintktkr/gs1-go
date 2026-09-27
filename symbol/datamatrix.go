@@ -2,7 +2,6 @@ package symbol
 
 import (
 	"errors"
-	"strings"
 
 	"github.com/galenzo17/gs1-go"
 )
@@ -19,31 +18,32 @@ type DataMatrixOptions struct {
 	Rectangular bool
 }
 
-// GS1DataMatrix encodes a GS1 element string as a GS1 DataMatrix symbol.
-// The input accepts anything gs1.Parse accepts, including bracket notation
-// such as "(01)04150000021126(17)250630(10)ABC123". The element string is
-// validated by parsing before encoding, and FNC1 is placed after every
-// element whose AI is not of predefined length, except the last.
-func GS1DataMatrix(input string, opts DataMatrixOptions) (*Matrix, error) {
-	b, err := gs1.Parse(input)
+// GS1DataMatrix encodes GS1 elements as a GS1 DataMatrix symbol. The
+// element string is built by gs1.Encode, which validates the elements, puts
+// the AIs of predefined length first and places FNC1 after every other
+// element except the last. To encode bracket notation or a scanned string,
+// parse it first:
+//
+//	b, err := gs1.Parse("(01)04150000021126(17)250630(10)ABC123")
+//	if err != nil {
+//		return err
+//	}
+//	m, err := symbol.GS1DataMatrix(b.Elements, symbol.DataMatrixOptions{})
+func GS1DataMatrix(elements []gs1.Element, opts DataMatrixOptions) (*Matrix, error) {
+	data, err := gs1.Encode(elements)
 	if err != nil {
 		return nil, err
 	}
-	cw, err := dmEncodeASCII(elementString(b.Elements), true)
-	if err != nil {
-		return nil, err
-	}
-	return encodeDataMatrix(cw, opts)
+	return encodeDataMatrix(dmEncodeASCII(data, true), opts)
 }
 
 // DataMatrix encodes arbitrary data as a plain (non-GS1) ECC 200 Data Matrix
 // symbol. Bytes above 127 are encoded with the upper shift codeword.
 func DataMatrix(data string, opts DataMatrixOptions) (*Matrix, error) {
-	cw, err := dmEncodeASCII(data, false)
-	if err != nil {
-		return nil, err
+	if data == "" {
+		return nil, errors.New("symbol: empty data")
 	}
-	return encodeDataMatrix(cw, opts)
+	return encodeDataMatrix(dmEncodeASCII(data, false), opts)
 }
 
 func encodeDataMatrix(cw []byte, opts DataMatrixOptions) (*Matrix, error) {
@@ -52,37 +52,6 @@ func encodeDataMatrix(cw []byte, opts DataMatrixOptions) (*Matrix, error) {
 		return nil, err
 	}
 	return dmPlace(dmECC(dmPad(cw, s.DataCW), s), s), nil
-}
-
-// elementString joins elements with FNC1 (ASCII 29) after each
-// variable-length field except the last. Element order is kept as given.
-//
-// This is a stand-in for gs1.Encode (#16, PR #34), which also reorders
-// predefined-length AIs first and validates the character set.
-func elementString(elems []gs1.Element) string {
-	var b strings.Builder
-	for i, e := range elems {
-		b.WriteString(e.AI)
-		b.WriteString(e.Value)
-		if i < len(elems)-1 && !predefinedLength(e.AI) {
-			b.WriteByte(0x1D)
-		}
-	}
-	return b.String()
-}
-
-// predefinedLength reports whether an AI is in GS1 General Specifications
-// table 7.8.5-2, the AIs that never need a trailing FNC1.
-func predefinedLength(ai string) bool {
-	if len(ai) < 2 {
-		return false
-	}
-	switch ai[:2] {
-	case "00", "01", "02", "03", "04", "11", "12", "13", "14", "15", "16",
-		"17", "18", "19", "20", "31", "32", "33", "34", "35", "36", "41":
-		return true
-	}
-	return false
 }
 
 // dmSize describes one ECC 200 symbol size (ISO/IEC 16022 table 7).

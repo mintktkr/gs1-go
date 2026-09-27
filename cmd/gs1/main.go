@@ -337,7 +337,12 @@ func runDataMatrix(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "usage: gs1 datamatrix [-o FILE] [-scale N] [-quiet N] [-rect] BARCODE")
 		return 2
 	}
-	m, err := symbol.GS1DataMatrix(fs.Arg(0), symbol.DataMatrixOptions{Rectangular: *rect})
+	b, err := gs1.Parse(fs.Arg(0))
+	if err != nil {
+		fmt.Fprintln(stderr, "gs1:", err)
+		return 1
+	}
+	m, err := symbol.GS1DataMatrix(b.Elements, symbol.DataMatrixOptions{Rectangular: *rect})
 	if err != nil {
 		fmt.Fprintln(stderr, "gs1:", err)
 		return 1

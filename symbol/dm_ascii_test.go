@@ -8,11 +8,10 @@ import (
 
 func TestDMASCII(t *testing.T) {
 	tests := []struct {
-		name    string
-		data    string
-		gs1     bool
-		want    []byte
-		wantErr bool
+		name string
+		data string
+		gs1  bool
+		want []byte
 	}{
 		{name: "six digits", data: "123456", want: []byte{142, 164, 186}},
 		{name: "letter", data: "A", want: []byte{66}},
@@ -29,13 +28,13 @@ func TestDMASCII(t *testing.T) {
 		{
 			// zint --gs1 -d [01]04150000021126: Data (9): 232 ..., 156
 			name: "gs1 fixed length element string",
-			data: "0104150000021126",
+			data: "\x1d0104150000021126",
 			gs1:  true,
 			want: []byte{232, 131, 134, 145, 130, 130, 132, 141, 156},
 		},
 		{
 			name: "gs1 variable length separator",
-			data: "10AB\x1d2112",
+			data: "\x1d10AB\x1d2112",
 			gs1:  true,
 			want: []byte{232, 140, 66, 67, 232, 151, 142},
 		},
@@ -44,36 +43,29 @@ func TestDMASCII(t *testing.T) {
 			// whose Data (21) codewords are exactly these. The 0x1D is the
 			// separator the element string puts after the variable length AI 21.
 			name: "gs1 element string with separator",
-			data: "010123456789012821XYZ123\x1d10A1B2",
+			data: "\x1d010123456789012821XYZ123\x1d10A1B2",
 			gs1:  true,
 			want: []byte{232, 131, 131, 153, 175, 197, 219, 131, 158, 151,
 				89, 90, 91, 142, 52, 232, 140, 66, 50, 67, 51},
 		},
 		{
+			// Only in GS1 mode does 0x1D become FNC1; plain data keeps it.
+			name: "plain group separator",
+			data: "1\x1d2",
+			want: []byte{50, 30, 51},
+		},
+		{
 			// The 0x1D breaks the pairing: 12 -> 142, 3 -> 52, FNC1, 45 -> 175.
 			name: "gs1 separator splits digits",
-			data: "123\x1d45",
+			data: "\x1d123\x1d45",
 			gs1:  true,
 			want: []byte{232, 142, 52, 232, 175},
 		},
-		{name: "gs1 high byte", data: "\xe9", gs1: true, wantErr: true},
-		{name: "gs1 high byte after ascii", data: "\xffA", gs1: true, wantErr: true},
-		{name: "empty", data: "", wantErr: true},
-		{name: "empty gs1", data: "", gs1: true, wantErr: true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := dmEncodeASCII(tt.data, tt.gs1)
-			if tt.wantErr {
-				if err == nil {
-					t.Fatalf("dmEncodeASCII(%q, %v) = %v, want error", tt.data, tt.gs1, got)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("dmEncodeASCII(%q, %v) error: %v", tt.data, tt.gs1, err)
-			}
+			got := dmEncodeASCII(tt.data, tt.gs1)
 			if !bytes.Equal(got, tt.want) {
 				t.Errorf("dmEncodeASCII(%q, %v) = %v, want %v", tt.data, tt.gs1, got, tt.want)
 			}
