@@ -16,7 +16,8 @@ import (
 // gs1 reports a leading FNC1; later FNC1 are returned as ASCII 29.
 //
 // Module positions come from probing dmPlace, whose output is checked
-// module for module against zint in TestDataMatrixGolden. Reed-Solomon is
+// module for module against zint in TestDataMatrixGolden and by an
+// independent reader in testdata/verify-decode.sh. Reed-Solomon is
 // verified through the syndromes of every block rather than by recomputing
 // the ECC, and the ASCII decoding is written apart from dmEncodeASCII.
 func dmRead(m *Matrix) (data string, gs1 bool, err error) {
