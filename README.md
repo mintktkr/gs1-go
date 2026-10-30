@@ -42,6 +42,9 @@ b.GSIN() // "12345678901234567"
 - **Element string encoding** with canonical fixed-AI ordering, FNC1 placement,
   association and check-digit enforcement, ZPL `^FD` output, and
   human-readable interpretation through `Barcode.HRI()`.
+- **GS1 DataMatrix generation** in the `symbol` sub-package: ECC 200 in every
+  square and rectangular size, rendered as `image.Image`, PNG or SVG, from the
+  elements `Encode` accepts. See [ADR 0009](docs/adr/0009-symbol-generation.md).
 - **Carrier detection** through `Barcode.Symbology`, including EAN/UPC and ITF-14.
 - **Scanner resilience by default.** UTF-8 BOM, CR/LF, NUL bytes and
   duplicated FNC1 from keyboard-wedge and USB HID scanners are normalized
@@ -257,6 +260,40 @@ reaches `Encode` and fails as `ErrUnknownAI`.
 `EncodeZPL` writes every FNC1 as the Code 128 invocation code `>8` and a
 literal `>` as `><`, for the `^BC` command in automatic mode. GS1 DataMatrix
 (`^BX`) uses a different FNC1 escape and is not covered.
+
+### Data Matrix
+
+`symbol.GS1DataMatrix` builds the element string with `Encode`, so its input
+is validated the same way, and returns a `Matrix` of modules without quiet
+zone. Render it at the module size and quiet zone the label needs; GS1 Data
+Matrix requires at least one module (General Specifications 5.12.3).
+`GS1DataMatrix` takes elements rather than a string, because `Parse` is
+deliberately lenient and recovers a missing FNC1 heuristically, and a printer
+must not print that guess: callers holding bracket notation split it with
+`ParseHRI` first. `gs1 datamatrix` accepts the same input as `gs1 encode`,
+which does that split for bracket notation.
+
+```go
+elements, err := gs1.ParseHRI("(01)04150000021126(17)250630(10)ABC123")
+if err != nil {
+	return err
+}
+m, err := symbol.GS1DataMatrix(elements, symbol.DataMatrixOptions{})
+if err != nil {
+	return err
+}
+svg := m.SVG(10, 1)   // SVG document at 10 pixels per module, 1 module quiet zone
+img := m.Image(10, 1) // *image.Gray with the quiet zone included
+```
+
+`PNG` writes that image to an `io.Writer`.
+
+`DataMatrixOptions{Rectangular: true}` picks the smallest rectangular size.
+Only ASCII encodation is implemented, which every GS1 element string can use;
+an optimizing encoder may choose a smaller symbol for long alphanumeric data.
+Symbols are checked against zint module for module in `go test`, decoded back
+by a round-trip test, and decoded by zxing-cpp with `make verify-symbol`.
+
 ### RFID tags (EPC)
 
 RFID reads land in the same `Barcode` shape as barcode scans. `ParseEPC`
@@ -402,6 +439,7 @@ cat scans.txt | gs1 parse -json                        # one JSON object per lin
 gs1 encode "(10)LOT42(01)04150000021126"               # raw string, FNC1 as ASCII GS
 gs1 encode -hri "(10)LOT42(01)04150000021126"          # (01)04150000021126(10)LOT42
 gs1 encode -zpl "(10)LOT42(01)04150000021126"          # >8010415000002112610LOT42
+gs1 datamatrix -o dm.png "(01)04150000021126(10)ABC"   # GS1 DataMatrix, SVG without -o
 gs1 epc 3074257BF7194E4000001A85                       # RFID tag to element string
 gs1 epc -json "urn:epc:tag:sscc-96:3.0614141.1234567890"
 gs1 gtin 04150000021126                                # GTIN check digit
@@ -508,11 +546,12 @@ agree, so the rate reported in CI moves only deliberately.
 
 ## Scope
 
-This library is a parsing and validation layer. It does not generate
-barcodes, verify print quality, resolve GS1 Digital Link URIs, or implement
-business documents such as dispatch advices. See
-[ADR 0002](docs/adr/0002-parser-scope.md) for the reasoning and the GS1
-resources that cover those areas.
+This library is a parsing and validation layer whose `symbol` sub-package
+also renders GS1 DataMatrix symbols
+([ADR 0009](docs/adr/0009-symbol-generation.md)). It does not verify print
+quality, resolve GS1 Digital Link URIs, or implement business documents such
+as dispatch advices. See [ADR 0002](docs/adr/0002-parser-scope.md) for the
+reasoning and the GS1 resources that cover those areas.
 
 For guidance on connecting scanner transports, storing parsed fields, and
 mapping records into dispatch advice workflows, see the

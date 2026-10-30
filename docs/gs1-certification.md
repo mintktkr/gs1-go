@@ -64,7 +64,8 @@ parsing of noisy scanner output stays the default (ADR 0008, ADR 0010).
 
 ## 2. Symbologies
 
-The module never touches pixels or bars. It consumes what the scanner
+Apart from the `symbol` sub-package (row 3.5), the module never touches
+pixels or bars. It consumes what the scanner
 decodes, so "supports symbology X" means: accepts the decoded string, with
 or without its AIM symbology identifier, and splits it correctly.
 
@@ -91,7 +92,7 @@ Printing symbols (checklist wording "impresión") is covered under 3.5 and track
 | 3.2 | Read and process AIs: split and store internally | Required | Covered | Elements in scan order, `Get`, typed accessors. Full AI table and association rules generated from the Syntax Dictionary (#13, #14). |
 | 3.3 | Separate and store each AI as its own field, e.g. (02) GTIN, (10) lot, (17) expiry, (37) count | Required | Covered | `Barcode.Elements` plus accessors. Dates return `time.Time`. |
 | 3.4 | Place, manage and interpret FNC1 after variable-length AIs | Required | Covered | Reading side complete. Writing side covered by `Encode` and `EncodeZPL`, which place FNC1 after every variable-length AI that is not last (#16). |
-| 3.5 | Print, read and interpret 2D symbologies; print simple and logistic labels | Required | Gap, rendering only | Reading is covered. Building the element string with correct AI order, FNC1 placement, association rules and check digits, plus HRI text and ZPL `^FD` data, is covered by `Encode`, `EncodeZPL`, `gs1 encode` and WASM `encode()` (#16). Rendering GS1-128, GS1 DataMatrix, GS1 QR, EAN/UPC and ITF-14 symbols and the logistic label layout (ZPL, SVG, image) is #24, which proposes superseding the no-generation clause of ADR 0002. |
+| 3.5 | Print, read and interpret 2D symbologies; print simple and logistic labels | Required | Gap, other symbologies and label layout | Reading is covered. Building the element string with correct AI order, FNC1 placement, association rules and check digits, plus HRI text and ZPL `^FD` data, is covered by `Encode`, `EncodeZPL`, `gs1 encode` and WASM `encode()` (#16). GS1 DataMatrix rendering is covered by the `symbol` package (`Image`, `PNG`, `SVG`) and `gs1 datamatrix` per ADR 0009 (#24); GS1-128, GS1 QR, EAN/UPC and ITF-14 symbols and the logistic label layout remain in #24. |
 | 3.6 | Samples and logistic labels validated with the local GS1 verifier | Required | Covered (data), print verification pending | Data conformance: `TestConformance` runs the GS1 Syntax Engine 1.4.1 and Syntax Dictionary 2026-01-27 vectors (#18), with documented divergences; `testdata/labels/` holds the logistic label element strings per carrier. Once #24 ships, its renderers will provide the printed samples for the GS1 member organisation's verifier (ISO/IEC 15415/15416); the resulting reports go in `testdata/labels/`. |
 
 ## 4. Reports compatible with global standards
@@ -139,10 +140,11 @@ Reference implementations: GS1 XML 3.x schemas and EANCOM at
 
 Rows marked "Covered" are implemented and tested in this module. Row 3.6
 counts as covered on the data side only: its print verification waits on
-#24. The one Required gap left is symbol rendering and the logistic label
-layout (3.5, #24), which will also supply the printed samples for 3.6. The
-conformance job (#18) is green and the CLI and WebAssembly bindings expose
-every covered feature (#21), so the module side of the checklist is
+#24. The one Required gap left is rendering of the remaining symbologies
+and the logistic label layout (3.5, #24), which will also supply the printed
+samples for 3.6. The conformance job (#18) is green and the CLI and
+WebAssembly bindings expose every covered feature except symbol rendering,
+which reaches WebAssembly later in #24 (#21), so the module side of the checklist is
 complete once #24 ships; the remaining rows are demonstrated by the
 application during the audit using the integration guide.
 

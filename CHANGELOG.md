@@ -115,6 +115,13 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
   `ErrDataTooLong`. ASCII encodation can express every GS1 element string. Golden data from zint checks
   every module of all 30 symbol sizes, and a test-only reader round-trips
   symbols in `go test` and under fuzzing.
+- `Matrix` renderers: `Image` returns an `*image.Gray`, `PNG` writes
+  a PNG and `SVG` a standalone document, each at a caller-chosen number of
+  pixels per module and quiet zone in modules, standard library only. CLI
+  `gs1 datamatrix [-o FILE] [-scale N] [-quiet N] [-rect] BARCODE` renders
+  from the same input as `gs1 encode`, SVG on stdout or PNG when FILE ends
+  in .png. `make verify-symbol` decodes every rendered symbol with zxing-cpp
+  through uv, outside `go.mod`.
 
 ### Changed
 

@@ -35,7 +35,8 @@
 // matching ^FD field data for Zebra printers; Barcode.HRI formats parsed
 // elements for human-readable labels. Both encoders enforce the AI
 // association rules and validate the check digit of every numeric GS1 key
-// they emit.
+// they emit. The symbol package (github.com/galenzo17/gs1-go/symbol) draws
+// GS1 DataMatrix symbols from these validated elements.
 //
 // # RFID
 //
