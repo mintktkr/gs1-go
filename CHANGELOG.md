@@ -107,6 +107,14 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - Measurement data in CLI JSON output.
 - `DueDate()` and `Warnings()` support, including due-date advisories in CLI
   and WASM JSON output.
+- `symbol` sub-package with the ECC 200 Data Matrix encoder (ISO/IEC 16022)
+  of ADR 0009. `GS1DataMatrix` takes validated elements and builds the
+  element string with `Encode`, so a symbol can only carry what the encoder
+  accepts; `DataMatrix` encodes arbitrary data. Both return a `Matrix` of
+  modules in the smallest square or rectangular size that fits, or
+  `ErrDataTooLong`. ASCII encodation can express every GS1 element string. Golden data from zint checks
+  every module of all 30 symbol sizes, and a test-only reader round-trips
+  symbols in `go test` and under fuzzing.
 
 ### Changed
 
