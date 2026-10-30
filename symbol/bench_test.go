@@ -44,3 +44,19 @@ func benchEncode(b *testing.B, in string) {
 
 func BenchmarkGS1DataMatrixSmall(b *testing.B) { benchEncode(b, benchSmall) }
 func BenchmarkGS1DataMatrixLarge(b *testing.B) { benchEncode(b, benchLarge) }
+
+func benchMatrix(b *testing.B, in string) *Matrix {
+	m, err := GS1DataMatrix(benchElements(b, in), DataMatrixOptions{})
+	if err != nil {
+		b.Fatal(err)
+	}
+	return m
+}
+
+func BenchmarkSVGLarge(b *testing.B) {
+	m := benchMatrix(b, benchLarge)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = m.SVG(10, 1)
+	}
+}
