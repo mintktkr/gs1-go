@@ -5,6 +5,7 @@
 //
 //	gs1 parse [-json] [-iso] [-strict] [-check-digits] [-gtin8] [-validate REGULATOR] [BARCODE]
 //	gs1 encode [-hri] [-zpl] [ELEMENTS]
+//	gs1 datamatrix [-o FILE] [-scale N] [-quiet N] [-rect] BARCODE
 //	gs1 epc [-json] [-validate REGULATOR] [EPC]
 //	gs1 gtin GTIN
 //	gs1 key KEY
@@ -29,11 +30,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime/debug"
 	"strconv"
 	"strings"
 
 	"github.com/galenzo17/gs1-go"
+	"github.com/galenzo17/gs1-go/symbol"
 )
 
 // version, commit and date are set by the linker for release builds
@@ -59,6 +62,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return runParse(args[1:], stdin, stdout, stderr)
 	case "encode":
 		return runEncode(args[1:], stdin, stdout, stderr)
+	case "datamatrix":
+		return runDataMatrix(args[1:], stdout, stderr)
 	case "epc":
 		return runEPC(args[1:], stdin, stdout, stderr)
 	case "gtin":
@@ -92,6 +97,7 @@ func usage(w io.Writer) {
 Usage:
   gs1 parse [-json] [-iso] [-strict] [-check-digits] [-gtin8] [-validate REGULATOR] [BARCODE]
   gs1 encode [-hri] [-zpl] [ELEMENTS]
+  gs1 datamatrix [-o FILE] [-scale N] [-quiet N] [-rect] BARCODE
   gs1 epc [-json] [-validate REGULATOR] [EPC]
   gs1 gtin GTIN
   gs1 key KEY
@@ -110,6 +116,9 @@ Commands:
            check digits enforced. -hri prints the human-readable
            interpretation, -zpl a ^FD payload with >8 FNC1 escapes. Reads
            stdin line by line when ELEMENTS is omitted.
+  datamatrix
+           Render a GS1 DataMatrix symbol as SVG (stdout, or -o FILE) or as
+           PNG when FILE ends in .png.
   epc      Decode an RFID tag (EPC Tag Data Standard hexadecimal memory
            content, tag URI or pure-identity URI) into the equivalent
            element string: SGTIN, SSCC, SGLN, GRAI and GIAI. Reads stdin
@@ -575,6 +584,59 @@ func encodeInput(input string) ([]gs1.Element, error) {
 		return nil, err
 	}
 	return parsed.Elements, nil
+}
+
+func runDataMatrix(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("gs1 datamatrix", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	out := fs.String("o", "", "write to `FILE`; PNG when it ends in .png, SVG otherwise")
+	scale := fs.Int("scale", 10, "pixels per module")
+	quiet := fs.Int("quiet", 1, "quiet zone in modules")
+	rect := fs.Bool("rect", false, "use a rectangular symbol")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 1 {
+		fmt.Fprintln(stderr, "usage: gs1 datamatrix [-o FILE] [-scale N] [-quiet N] [-rect] BARCODE")
+		return 2
+	}
+	elements, err := encodeInput(fs.Arg(0))
+	if err != nil {
+		fmt.Fprintln(stderr, "gs1:", err)
+		return 1
+	}
+	m, err := symbol.GS1DataMatrix(elements, symbol.DataMatrixOptions{Rectangular: *rect})
+	if err != nil {
+		fmt.Fprintln(stderr, "gs1:", err)
+		return 1
+	}
+	if *out == "" {
+		fmt.Fprint(stdout, m.SVG(*scale, *quiet))
+		return 0
+	}
+	if err := writeSymbol(*out, m, *scale, *quiet); err != nil {
+		fmt.Fprintln(stderr, "gs1:", err)
+		return 1
+	}
+	return 0
+}
+
+// writeSymbol writes m to path as PNG when the extension is .png and as SVG
+// otherwise.
+func writeSymbol(path string, m *symbol.Matrix, scale, quiet int) error {
+	f, err := os.Create(filepath.Clean(path))
+	if err != nil {
+		return err
+	}
+	if strings.EqualFold(filepath.Ext(path), ".png") {
+		err = m.PNG(f, scale, quiet)
+	} else {
+		_, err = io.WriteString(f, m.SVG(scale, quiet))
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	return err
 }
 
 func runGTIN(args []string, stdout, stderr io.Writer) int {

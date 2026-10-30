@@ -3,10 +3,13 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"image/png"
+	"os"
 	"strings"
 	"testing"
 
 	gs1 "github.com/galenzo17/gs1-go"
+	"github.com/galenzo17/gs1-go/symbol"
 )
 
 func exec(t *testing.T, stdin string, args ...string) (code int, stdout, stderr string) {
@@ -520,5 +523,131 @@ func TestUsageAndVersion(t *testing.T) {
 	defer func() { version, commit, date = "", "", "" }()
 	if code, out, _ := exec(t, "", "version"); code != 0 || strings.TrimSpace(out) != "gs1 v9.9.9 (abc1234, 2026-01-02)" {
 		t.Errorf("release version: exit %d out %q", code, out)
+	}
+}
+
+// dataMatrixSVG is the expected document for input rendered with the given
+// parameters, built from the library rather than the CLI.
+func dataMatrixSVG(t *testing.T, input string, opts symbol.DataMatrixOptions, scale, quiet int) string {
+	t.Helper()
+	elements, err := gs1.ParseHRI(input)
+	if err != nil {
+		t.Fatalf("ParseHRI(%q) error = %v", input, err)
+	}
+	m, err := symbol.GS1DataMatrix(elements, opts)
+	if err != nil {
+		t.Fatalf("GS1DataMatrix() error = %v", err)
+	}
+	return m.SVG(scale, quiet)
+}
+
+func TestDataMatrixSVG(t *testing.T) {
+	const input = "(01)04150000021126(17)250630(10)ABC123"
+	code, out, errOut := exec(t, "", "datamatrix", "-scale", "3", "-quiet", "2", input)
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	if want := dataMatrixSVG(t, input, symbol.DataMatrixOptions{}, 3, 2); out != want {
+		t.Errorf("SVG() =\n%s\nwant\n%s", out, want)
+	}
+}
+
+func TestDataMatrixRectangular(t *testing.T) {
+	const input = "(01)04150000021126(10)ABC123"
+	code, out, errOut := exec(t, "", "datamatrix", "-rect", input)
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	want := dataMatrixSVG(t, input, symbol.DataMatrixOptions{Rectangular: true}, 10, 1)
+	if out != want {
+		t.Errorf("SVG() =\n%s\nwant\n%s", out, want)
+	}
+}
+
+// TestDataMatrixRawInput checks that the command accepts what gs1 encode
+// accepts: bracket notation and a raw scan string.
+func TestDataMatrixRawInput(t *testing.T) {
+	b := dataMatrixSVG(t, "(01)04150000021126(10)LOT42", symbol.DataMatrixOptions{}, 10, 1)
+	for _, input := range []string{"(10)LOT42(01)04150000021126", "]d2010415000002112610LOT42"} {
+		code, out, errOut := exec(t, "", "datamatrix", input)
+		if code != 0 {
+			t.Fatalf("%s: exit %d: %s", input, code, errOut)
+		}
+		if out != b {
+			t.Errorf("%s: SVG differs from bracket notation", input)
+		}
+	}
+}
+
+func TestDataMatrixWritesSVGFile(t *testing.T) {
+	path := t.TempDir() + "/dm.svg"
+	const input = "(01)04150000021126"
+	code, _, errOut := exec(t, "", "datamatrix", "-o", path, input)
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := dataMatrixSVG(t, input, symbol.DataMatrixOptions{}, 10, 1); string(got) != want {
+		t.Errorf("file SVG =\n%s\nwant\n%s", got, want)
+	}
+}
+
+func TestDataMatrixPNG(t *testing.T) {
+	path := t.TempDir() + "/dm.PNG"
+	code, _, errOut := exec(t, "", "datamatrix", "-o", path, "-scale", "4", "-quiet", "2", "0104150000021126")
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	img, err := png.Decode(f)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		t.Fatalf("png.Decode() error = %v", err)
+	}
+	// The 16-character element string fits a 16x16 module symbol.
+	if want := (16 + 2*2) * 4; img.Bounds().Dx() != want || img.Bounds().Dy() != want {
+		t.Errorf("image size = %v, want %d x %d", img.Bounds(), want, want)
+	}
+}
+
+func TestDataMatrixErrors(t *testing.T) {
+	dir := t.TempDir()
+	tests := []struct {
+		name    string
+		args    []string
+		code    int
+		wantErr string
+	}{
+		{name: "no barcode", args: []string{"datamatrix"}, code: 2, wantErr: "usage: gs1 datamatrix"},
+		{name: "too many arguments", args: []string{"datamatrix", "-scale", "2", "0104150000021126", "10LOT42"}, code: 2, wantErr: "usage: gs1 datamatrix"},
+		{name: "bad flag", args: []string{"datamatrix", "-nope", "0104150000021126"}, code: 2, wantErr: "flag provided but not defined"},
+		{name: "malformed bracket notation", args: []string{"datamatrix", "(01"}, code: 1, wantErr: "gs1: invalid data"},
+		{name: "unknown AI", args: []string{"datamatrix", "(999)1"}, code: 1, wantErr: "gs1: unknown application identifier"},
+		// Parse accepts a wrong check digit; gs1.Encode refuses to print it.
+		{name: "wrong check digit", args: []string{"datamatrix", "(01)04150000021127"}, code: 1, wantErr: "invalid check digit"},
+		{name: "too long for rectangular", args: []string{"datamatrix", "-rect", "(01)04150000021126(91)" + strings.Repeat("A", 90)}, code: 1, wantErr: "gs1: symbol: data too long"},
+		{name: "unwritable path", args: []string{"datamatrix", "-o", dir, "0104150000021126"}, code: 1, wantErr: "gs1: open"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			code, out, errOut := exec(t, "", tt.args...)
+			if code != tt.code {
+				t.Fatalf("exit %d, want %d (stderr %q)", code, tt.code, errOut)
+			}
+			if out != "" {
+				t.Errorf("stdout = %q, want empty", out)
+			}
+			if !strings.Contains(errOut, tt.wantErr) {
+				t.Errorf("stderr = %q, want containing %q", errOut, tt.wantErr)
+			}
+		})
 	}
 }
